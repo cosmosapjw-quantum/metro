@@ -12,5 +12,4 @@ Codex에게:
 
 ## 2) 산출물 체크
 - `.specify/memory/constitution.md` 생성/업데이트 확인
-- `specs/001-metroflow/` 산출물 생성 확인
-
+- `specs/001-adaptive-traffic-sim/` 산출물 생성 확인

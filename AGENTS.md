@@ -7,7 +7,7 @@
 - 큰 리라이트 금지: 작은 diff, 작은 task, 빠른 테스트
 - 성능은 “증거 기반”: 프로파일/벤치/측정 없이 성능 주장 금지
 - 외부 데이터 학습 금지: 학습은 시뮬레이터 내부 경험(online)만 사용
-- 결정은 문서화: trade-off는 `specs/001-metroflow/research.md`와 `docs/ARCHITECTURE.md`에 남길 것
+- 결정은 문서화: trade-off는 `specs/001-adaptive-traffic-sim/research.md`와 `docs/ARCHITECTURE.md`에 남길 것
 
 ## 1) 개발 모드
 - Python 3.11+ / uv / ruff / pytest 기준
@@ -20,7 +20,7 @@
 - 경계 조건: 주말/평일, 시간대 전환, 막힌 간선(공사/사고) 등
 
 ## 3) 작업 방식
-- 먼저 `specs/001-metroflow/tasks.md`의 다음 task를 선택
+- 먼저 `specs/001-adaptive-traffic-sim/tasks.md`의 다음 task를 선택
 - 구현 전: 관련 문서(특히 plan/data-model) 위치를 task 내에 링크/참조
 - 구현 후: `pytest -q` + 최소한의 성능 스모크(예: 1분 시뮬 100k 도시) 실행
 - 필요하면 `/review`(Codex CLI)로 diff 리뷰 수행

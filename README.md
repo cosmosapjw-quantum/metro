@@ -30,5 +30,5 @@
 문서
 - `docs/PRD.md` : 제품 요구사항(PRD)
 - `docs/SDD_WORKFLOW.md` : spec-kit + Codex로 SDD 진행 절차
-- `specs/001-metroflow/` : spec/plan/tasks + 부속 문서(quickstart, data-model 등)
+- `specs/001-adaptive-traffic-sim/` : spec/plan/tasks + 부속 문서(quickstart, data-model 등)
 - `docs/prompts/` : Codex/Spec-Kit용 프롬프트 세트
