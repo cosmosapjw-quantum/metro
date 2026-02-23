@@ -8,7 +8,10 @@ description: "Task list template for feature implementation"
 **Input**: Design documents from `/specs/[###-feature-name]/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
+**Tests**: The examples below include test tasks. User-facing feature tests remain
+OPTIONAL unless requested in the feature specification, but simulation-core,
+routing, demand, learning, or performance-sensitive changes MUST include
+invariant/reproducibility validation tasks and an appropriate smoke benchmark.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -85,6 +88,10 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
 - [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T0XX [P] [US1] (If simulation core touched) Add/update invariant tests for
+      conservation, non-negative queues, and capacity detection
+- [ ] T0XX [US1] (If randomness/learning touched) Add/update fixed-seed
+      reproducibility test
 
 ### Implementation for User Story 1
 
@@ -109,6 +116,8 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
 - [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T0XX [P] [US2] (If simulation behavior touched) Add/update boundary tests
+      for weekday/weekend, time transitions, or blocked edges
 
 ### Implementation for User Story 2
 
@@ -131,6 +140,8 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
 - [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T0XX [US3] (If performance-sensitive) Add/update smoke benchmark with
+      measurement notes
 
 ### Implementation for User Story 3
 
@@ -152,10 +163,12 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] TXXX [P] Documentation updates in docs/
 - [ ] TXXX Code cleanup and refactoring
-- [ ] TXXX Performance optimization across all stories
+- [ ] TXXX Performance optimization across all stories (measurement required)
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
-- [ ] TXXX Run quickstart.md validation
+- [ ] TXXX Run containerized validation (`./scripts/in_docker.sh pytest -q` and
+      relevant smoke/demo)
+- [ ] TXXX [P] Verify visualization changes (if any) do not block core loop
 
 ---
 
@@ -179,6 +192,8 @@ Examples of foundational tasks (adjust based on your project):
 ### Within Each User Story
 
 - Tests (if included) MUST be written and FAIL before implementation
+- Simulator-impacting changes MUST add/update invariant, boundary, and/or
+  reproducibility tests as applicable
 - Models before services
 - Services before endpoints
 - Core implementation before integration
@@ -246,6 +261,9 @@ With multiple developers:
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
 - Verify tests fail before implementing
+- Run validation commands inside the ROCm container for Python/JAX/test/format
+  workflows
+- Do not claim performance improvements without benchmark/profile evidence
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

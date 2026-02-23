@@ -29,3 +29,22 @@
 - “한 번에 다 만들기” 금지(특히 RL/GNN/LSTM 전체를 한 번에)
 - 도시 생성기와 교통 엔진을 강결합하지 말 것(그래프/수요/유량 레이어 분리)
 - 시각화는 core loop를 막지 않게(비동기 큐/다운샘플/프레임 스킵)
+
+## Mandatory runtime (AMD ROCm / RX 6950 XT)
+All commands (tests, demo runs, formatting) MUST be executed inside the ROCm container.
+Do not run Python/JAX on the host.
+
+### Build image
+docker build -f Dockerfile.rocm -t metroflow:rocm .
+
+### Run any command inside the container (preferred)
+./scripts/in_docker.sh <command...>
+
+### Standard checks
+./scripts/in_docker.sh python -m metroflow.demo
+./scripts/in_docker.sh pytest -q
+./scripts/in_docker.sh ruff check .
+
+Notes:
+- The base image already contains ROCm-enabled JAX. When installing the project inside the image, use:
+  pip install --no-deps -e .

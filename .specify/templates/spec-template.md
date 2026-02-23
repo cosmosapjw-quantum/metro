@@ -72,8 +72,13 @@
   Fill them out with the right edge cases.
 -->
 
-- What happens when [boundary condition]?
-- How does system handle [error scenario]?
+- What happens at weekday/weekend mode boundaries relevant to this feature?
+- How does the system behave across time-of-day transitions while agents are
+  already in-flight?
+- How does the system handle blocked edges/incidents/construction closures?
+- How are capacity limits enforced, and how are violations detected/reported?
+- If randomness or learning is involved, what fixed-seed behavior must remain
+  reproducible?
 
 ## Requirements *(mandatory)*
 
@@ -89,6 +94,13 @@
 - **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
 - **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
 - **FR-005**: System MUST [behavior, e.g., "log all security events"]
+
+*For simulation/routing/learning features, add explicit requirements for:*
+- conservation of vehicles/agents, non-negative queues, and capacity-violation
+  detection
+- baseline-policy fallback and gradual mixing of learned policy (if applicable)
+- simulator-internal-only learning updates (no external data training)
+- fixed-seed reproducibility expectations
 
 *Example of marking unclear requirements:*
 
@@ -113,3 +125,6 @@
 - **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+
+*Performance criteria MUST state measurement method/environment (including
+container/runtime assumptions) and avoid unmeasured claims.*

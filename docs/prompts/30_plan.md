@@ -2,7 +2,7 @@
 
 아래를 그대로 입력:
 
-/speckit.plan
+/prompts:speckit.plan
 기술 요구:
 - Python 3.11+, JAX를 핵심으로 사용(jit/vmap/segment ops).
 - 인구 100k를 유지하되 매 tick 전체를 업데이트하지 말고, 이동 중인 active agent만 packed array로 관리.

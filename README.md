@@ -18,13 +18,17 @@
 2) Codex CLI 사용 시
 - 루트의 `AGENTS.md`를 읽고 진행하도록 되어 있음(프로젝트 규율/워크플로우 포함)
 
-3) 데모 실행(스켈레톤)
-- `uv venv && uv pip install -e ".[dev]"`
-- `python -m metroflow.demo`
+3) 데모/검증 실행(ROCm 컨테이너 필수)
+- `docker build -f Dockerfile.rocm -t metroflow:rocm .`
+- `./scripts/in_docker.sh pip install --no-deps -e .`
+- `./scripts/in_docker.sh python -m metroflow.demo`
+- `./scripts/in_docker.sh pytest -q`
+
+주의
+- Python/JAX 기반 실행(데모, 테스트, 포매팅)은 호스트가 아니라 ROCm 컨테이너에서 수행한다.
 
 문서
 - `docs/PRD.md` : 제품 요구사항(PRD)
 - `docs/SDD_WORKFLOW.md` : spec-kit + Codex로 SDD 진행 절차
 - `specs/001-metroflow/` : spec/plan/tasks + 부속 문서(quickstart, data-model 등)
 - `docs/prompts/` : Codex/Spec-Kit용 프롬프트 세트
-

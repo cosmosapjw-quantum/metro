@@ -2,7 +2,7 @@
 
 아래를 그대로 Codex(또는 에이전트)에게 입력:
 
-/speckit.constitution
+/prompts:speckit.constitution
 MetroFlow는 인구 10만 규모 도시에서 동적 교통을 시뮬레이션한다.
 원칙:
 - 외부 데이터 학습 금지. 정책/모델 업데이트는 시뮬레이터 내부 경험(online)만 사용.

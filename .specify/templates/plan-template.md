@@ -31,7 +31,26 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [ ] SDD order preserved (`spec -> plan -> tasks -> implement`); scope is a small,
+      reviewable diff tied to explicit tasks
+- [ ] Routing/control design keeps a safe baseline (congestion-aware shortest
+      path or dynamic potential) and documents gradual mixing for any learned
+      policy
+- [ ] Learning/training changes use simulator-internal experience only (no
+      external training data)
+- [ ] Core loop design is JAX-first and `jit`-compatible; state transitions are
+      pure-function friendly; RNG plan uses explicit `PRNGKey`
+- [ ] Validation plan includes simulator invariants (agent/vehicle conservation,
+      non-negative queues, capacity violation detection)
+- [ ] Validation plan covers boundary conditions relevant to scope (weekday/weekend,
+      time transitions, blocked edges/incidents)
+- [ ] Reproducibility plan defines fixed-seed test/smoke expectations
+- [ ] Performance plan defines measurement method and target impact relative to
+      100k population / 10k-30k active agents / 2-10 Hz tick objective
+- [ ] Visualization changes (if any) are asynchronous or rate-limited so they do
+      not block the core loop
+- [ ] Trade-offs to be recorded in `specs/001-metroflow/research.md` and
+      `docs/ARCHITECTURE.md`
 
 ## Project Structure
 
