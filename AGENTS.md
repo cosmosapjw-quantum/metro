@@ -48,3 +48,10 @@ docker build -f Dockerfile.rocm -t metroflow:rocm .
 Notes:
 - The base image already contains ROCm-enabled JAX. When installing the project inside the image, use:
   pip install --no-deps -e .
+
+## Active Technologies
+- Python 3.11+ + JAX (jit/vmap/segment ops), NumPy-compatible array tooling, (001-adaptive-traffic-sim)
+- N/A for persistent DB; file-based configs/scenario specs/benchmark outputs (001-adaptive-traffic-sim)
+
+## Recent Changes
+- 001-adaptive-traffic-sim: Added Python 3.11+ + JAX (jit/vmap/segment ops), NumPy-compatible array tooling,
