@@ -132,3 +132,52 @@ UI packet stream smoke (separate viewer/client if applicable):
 - Research decisions: `specs/001-adaptive-traffic-sim/research.md`
 - Data model: `specs/001-adaptive-traffic-sim/data-model.md`
 - Contracts: `specs/001-adaptive-traffic-sim/contracts/`
+
+## 7) Phase 1 Setup Task Checkpoints (Placeholders)
+
+Use this checklist to record setup-task completion and quick validation notes as
+implementation progresses.
+
+- [ ] `T001` Package scaffolding (`src/metroflow/*/__init__.py`)
+- [ ] `T002` Test directory scaffolding (`tests/unit`, `tests/integration`, `tests/contract`, `tests/benchmarks`)
+- [ ] `T003` Shared pytest fixtures skeleton (`tests/conftest.py`)
+- [ ] `T004` Feature test constants/seed registry (`tests/fixtures/simulation_scenarios.py`)
+- [ ] `T005` Benchmark reporting utility skeleton (`src/metroflow/benchmarks/reporting.py`)
+- [ ] `T006` Quickstart checkpoint/validation placeholders (this section + section 8)
+
+## 8) Validation Command Log Placeholders
+
+Record the exact command, environment, and outcome when running setup/foundational
+validation during implementation.
+
+### Setup / Sanity
+
+```bash
+# [placeholder] Build ROCm image (run when image changes)
+docker build -f Dockerfile.rocm -t metroflow:rocm .
+
+# [placeholder] Install editable package in container
+./scripts/in_docker.sh pip install --no-deps -e .
+```
+
+### Per-Task Validation
+
+```bash
+# [placeholder] Pytest smoke after setup/foundational tasks
+./scripts/in_docker.sh pytest -q
+
+# [placeholder] Demo smoke after setup/foundational tasks
+./scripts/in_docker.sh python -m metroflow.demo
+
+# [placeholder] Lint check for touched files / repo
+./scripts/in_docker.sh ruff check .
+```
+
+### Run Log Template
+
+- Date (UTC):
+- Task(s):
+- Command:
+- Environment (container image/tag):
+- Result (pass/fail):
+- Notes:
