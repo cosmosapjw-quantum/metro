@@ -1,0 +1,23 @@
+[project]
+name = "metroflow"
+version = "0.0.1"
+description = "JAX-first self-learning traffic engine for city builders (spec-kit bundle)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "jax",
+  "jaxlib",
+  "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
