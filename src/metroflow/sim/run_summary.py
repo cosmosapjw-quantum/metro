@@ -36,6 +36,15 @@ class BaselineRunSummary:
     ui_packets_emitted: int
     hotspot_links_top_k: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     ui_packet_counts: dict[str, int] = field(default_factory=dict)
+    disruption_active_event_count: int = 0
+    disruption_affected_link_count: int = 0
+    reroute_decisions_total: int = 0
+    persistence_decisions_total: int = 0
+    reroute_share: float = 0.0
+    persistence_share: float = 0.0
+    corridor_shift_count: int = 0
+    corridor_shift_share: float = 0.0
+    disruption_response_metrics_available: bool = False
 
     def __post_init__(self) -> None:
         self.scenario_id = str(self.scenario_id)
@@ -54,6 +63,15 @@ class BaselineRunSummary:
         self.ui_packets_emitted = int(self.ui_packets_emitted)
         self.hotspot_links_top_k = tuple(dict(item) for item in self.hotspot_links_top_k)
         self.ui_packet_counts = {str(k): int(v) for k, v in dict(self.ui_packet_counts).items()}
+        self.disruption_active_event_count = int(self.disruption_active_event_count)
+        self.disruption_affected_link_count = int(self.disruption_affected_link_count)
+        self.reroute_decisions_total = int(self.reroute_decisions_total)
+        self.persistence_decisions_total = int(self.persistence_decisions_total)
+        self.reroute_share = float(self.reroute_share)
+        self.persistence_share = float(self.persistence_share)
+        self.corridor_shift_count = int(self.corridor_shift_count)
+        self.corridor_shift_share = float(self.corridor_shift_share)
+        self.disruption_response_metrics_available = bool(self.disruption_response_metrics_available)
 
 
 def build_baseline_run_summary(
@@ -68,6 +86,7 @@ def build_baseline_run_summary(
         str(k): int(v) for k, v in dict(ui_packet_counts).items()
     }
     metrics_state = state.dynamic.metrics_state if isinstance(state.dynamic.metrics_state, Mapping) else {}
+    dynamic_metadata = state.dynamic.metadata if isinstance(state.dynamic.metadata, Mapping) else {}
     generated_total = int(metrics_state.get("generated_trip_total", 0))
     completed_total = int(metrics_state.get("completed_trips_total", 0))
     failed_total = int(metrics_state.get("failed_trips_total", 0))
@@ -85,6 +104,27 @@ def build_baseline_run_summary(
     negative_queue_detected = bool(
         metrics_state.get("negative_queue_detected", _negative_queue_detected_fallback(state))
     )
+    active_event_count = _active_event_count_fallback(state)
+    affected_link_count = _affected_link_count_fallback(state)
+    reroute_total = int(metrics_state.get("us2_reroute_decisions_total", dynamic_metadata.get("us2_reroute_decisions_total", 0)))
+    persistence_total = int(
+        metrics_state.get("us2_persistence_decisions_total", dynamic_metadata.get("us2_persistence_decisions_total", 0))
+    )
+    corridor_shift_count = int(
+        metrics_state.get("us2_corridor_shift_count_total", dynamic_metadata.get("us2_corridor_shift_count_total", 0))
+    )
+    disruption_response_metrics_available = any(
+        key in metrics_state or key in dynamic_metadata
+        for key in (
+            "us2_reroute_decisions_total",
+            "us2_persistence_decisions_total",
+            "us2_corridor_shift_count_total",
+        )
+    )
+    behavior_decision_total = max(0, reroute_total + persistence_total)
+    reroute_share = float(reroute_total / behavior_decision_total) if behavior_decision_total > 0 else 0.0
+    persistence_share = float(persistence_total / behavior_decision_total) if behavior_decision_total > 0 else 0.0
+    corridor_shift_share = float(corridor_shift_count / reroute_total) if reroute_total > 0 else 0.0
 
     return BaselineRunSummary(
         scenario_id=str(getattr(state.static, "scenario_id", "") or "unknown"),
@@ -103,6 +143,15 @@ def build_baseline_run_summary(
         ui_packets_emitted=ui_packets_emitted,
         hotspot_links_top_k=_hotspot_links_top_k(state, k=hotspot_top_k),
         ui_packet_counts=normalized_ui_packet_counts,
+        disruption_active_event_count=active_event_count,
+        disruption_affected_link_count=affected_link_count,
+        reroute_decisions_total=reroute_total,
+        persistence_decisions_total=persistence_total,
+        reroute_share=reroute_share,
+        persistence_share=persistence_share,
+        corridor_shift_count=corridor_shift_count,
+        corridor_shift_share=corridor_shift_share,
+        disruption_response_metrics_available=disruption_response_metrics_available,
     )
 
 
@@ -135,6 +184,36 @@ def _negative_queue_detected_fallback(state: SimulationState) -> bool:
         return int(getattr(counters, "negative_queue_violations", 0) or 0) > 0
     except Exception:
         return False
+
+
+def _active_event_count_fallback(state: SimulationState) -> int:
+    event_state = state.dynamic.event_state
+    if isinstance(event_state, Mapping):
+        active_events = event_state.get("active_events")
+    else:
+        active_events = getattr(event_state, "active_events", None)
+    try:
+        return max(0, _safe_len(active_events))
+    except Exception:
+        return 0
+
+
+def _affected_link_count_fallback(state: SimulationState) -> int:
+    metadata = state.dynamic.metadata if isinstance(state.dynamic.metadata, Mapping) else {}
+    raw = metadata.get("us2_active_event_affected_link_ids", ())
+    try:
+        return max(0, _safe_len(raw))
+    except Exception:
+        return 0
+
+
+def _safe_len(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return int(len(value))
+    except Exception:
+        return sum(1 for _ in value)
 
 
 def _hotspot_links_top_k(state: SimulationState, *, k: int) -> tuple[dict[str, Any], ...]:

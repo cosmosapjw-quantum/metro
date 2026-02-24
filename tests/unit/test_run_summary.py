@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import pytest
 
 from metroflow.city.generator import SyntheticCityTopology
 from metroflow.city.graph import Node, NodeKind, RoadClass, RoadLink
+from metroflow.flow.events import TrafficEvent, TrafficEventSchedulerState, TrafficEventStatus
 from metroflow.flow.state import LinkState
 from metroflow.sim.invariants import InvariantCounters, InvariantReport
 from metroflow.sim.run_summary import build_baseline_run_summary
@@ -74,6 +76,10 @@ def test_build_baseline_run_summary_aggregates_trip_totals_and_hotspots():
     assert summary.pending_trip_requests == 35
     assert summary.capacity_violation_count == 1
     assert summary.ui_packets_emitted == 4
+    assert summary.reroute_decisions_total == 0
+    assert summary.persistence_decisions_total == 0
+    assert summary.corridor_shift_count == 0
+    assert summary.disruption_response_metrics_available is False
     assert summary.hotspot_links_top_k[0]["link_id"] == 10
     assert summary.hotspot_links_top_k[0]["congestion_ratio"] > summary.hotspot_links_top_k[1]["congestion_ratio"]
     assert summary.ui_packet_counts["ui.congestion_frame"] == 2
@@ -115,3 +121,42 @@ def test_build_baseline_run_summary_uses_packet_count_sum_and_invariant_fallback
     )
     assert summary.ui_packets_emitted == 4
     assert summary.negative_queue_detected is True
+
+
+def test_build_baseline_run_summary_includes_us2_disruption_response_metrics():
+    event = TrafficEvent(
+        event_id=7001,
+        event_type="accident",
+        start_tick=1,
+        end_tick=10,
+        target_scope={"link_ids": (10,)},
+        severity=0.6,
+        effect_model={"kind": "capacity_reduction", "multiplier": 0.4},
+        status=TrafficEventStatus.ACTIVE,
+    )
+    state = SimulationState(
+        static=SimulationStaticRefs(scenario_id="us2-demo"),
+        dynamic=SimulationDynamicRefs(
+            clock_state=SimulationClockState(tick_index=5),
+            event_state=TrafficEventSchedulerState(active_events=(event,)),
+            metrics_state={
+                "generated_trip_total": 20,
+                "completed_trips_total": 7,
+                "failed_trips_total": 2,
+                "us2_reroute_decisions_total": 6,
+                "us2_persistence_decisions_total": 4,
+                "us2_corridor_shift_count_total": 3,
+            },
+            metadata={"us2_active_event_affected_link_ids": (10, 11, 12)},
+        ),
+    )
+    summary = build_baseline_run_summary(state)
+    assert summary.disruption_active_event_count == 1
+    assert summary.disruption_affected_link_count == 3
+    assert summary.reroute_decisions_total == 6
+    assert summary.persistence_decisions_total == 4
+    assert summary.corridor_shift_count == 3
+    assert summary.reroute_share == pytest.approx(0.6)
+    assert summary.persistence_share == pytest.approx(0.4)
+    assert summary.corridor_shift_share == pytest.approx(0.5)
+    assert summary.disruption_response_metrics_available is True

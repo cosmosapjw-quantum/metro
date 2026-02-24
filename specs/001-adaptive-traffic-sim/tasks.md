@@ -107,23 +107,23 @@ description: "Task list for Adaptive Traffic Simulation for Virtual City"
 
 ### Tests for User Story 2
 
-- [ ] T042 [P] [US2] Add unit tests for traffic event scheduling/activation/clearing in `tests/unit/test_traffic_events.py`
-- [ ] T043 [P] [US2] Add unit tests for route-choice profile diversity sampling and persistence/reroute thresholds in `tests/unit/test_behavior_profiles.py`
-- [ ] T044 [P] [US2] Add integration tests for blocked-edge/bridge event rerouting and recorded failures in `tests/integration/test_us2_disruption_rerouting.py`
-- [ ] T045 [P] [US2] Add integration tests for congestion redistribution after incidents in `tests/integration/test_us2_congestion_redistribution.py`
-- [ ] T046 [P] [US2] Add contract tests for `ui.event_overlay`, `ui.control_command`, and `ui.control_ack` packets in `tests/contract/test_ui_event_control_contract.py`
-- [ ] T047 [US2] Add boundary/invariant regression tests for disruption scenarios (blocked edges + time transitions) in `tests/integration/test_us2_boundary_invariants.py`
+- [X] T042 [P] [US2] Add unit tests for traffic event scheduling/activation/clearing in `tests/unit/test_traffic_events.py`
+- [X] T043 [P] [US2] Add unit tests for route-choice profile diversity sampling and persistence/reroute thresholds in `tests/unit/test_behavior_profiles.py`
+- [X] T044 [P] [US2] Add integration tests for blocked-edge/bridge event rerouting and recorded failures in `tests/integration/test_us2_disruption_rerouting.py`
+- [X] T045 [P] [US2] Add integration tests for congestion redistribution after incidents in `tests/integration/test_us2_congestion_redistribution.py`
+- [X] T046 [P] [US2] Add contract tests for `ui.event_overlay`, `ui.control_command`, and `ui.control_ack` packets in `tests/contract/test_ui_event_control_contract.py`
+- [X] T047 [US2] Add boundary/invariant regression tests for disruption scenarios (blocked edges + time transitions) in `tests/integration/test_us2_boundary_invariants.py`
 
 ### Implementation for User Story 2
 
-- [ ] T048 [P] [US2] Implement traffic event models and scheduler state transitions in `src/metroflow/flow/events.py`
-- [ ] T049 [US2] Implement event effects on link capacities/closures in `src/metroflow/flow/event_effects.py`
-- [ ] T050 [P] [US2] Implement route-choice behavior profile generation and diversity sampling in `src/metroflow/routing/behavior_profiles.py`
-- [ ] T051 [US2] Implement disruption-aware reroute trigger logic (reroute vs persist) in `src/metroflow/routing/reroute_policy.py`
-- [ ] T052 [US2] Integrate traffic events and behavior diversity into tick orchestration in `src/metroflow/sim/step.py`
-- [ ] T053 [US2] Implement event overlay packet generation and command acknowledgements in `src/metroflow/ui/packets.py`
-- [ ] T054 [US2] Implement disruption scenario presets for demos in `src/metroflow/ui/scenario_controls.py`
-- [ ] T055 [US2] Extend run summary with disruption response metrics (reroute share, persistence share, corridor shifts) in `src/metroflow/sim/run_summary.py`
+- [X] T048 [P] [US2] Implement traffic event models and scheduler state transitions in `src/metroflow/flow/events.py`
+- [X] T049 [US2] Implement event effects on link capacities/closures in `src/metroflow/flow/event_effects.py`
+- [X] T050 [P] [US2] Implement route-choice behavior profile generation and diversity sampling in `src/metroflow/routing/behavior_profiles.py`
+- [X] T051 [US2] Implement disruption-aware reroute trigger logic (reroute vs persist) in `src/metroflow/routing/reroute_policy.py`
+- [X] T052 [US2] Integrate traffic events and behavior diversity into tick orchestration in `src/metroflow/sim/step.py`
+- [X] T053 [US2] Implement event overlay packet generation and command acknowledgements in `src/metroflow/ui/packets.py`
+- [X] T054 [US2] Implement disruption scenario presets for demos in `src/metroflow/ui/scenario_controls.py`
+- [X] T055 [US2] Extend run summary with disruption response metrics (reroute share, persistence share, corridor shifts) in `src/metroflow/sim/run_summary.py`
 
 **Checkpoint**: User Story 2 demonstrates event-driven congestion changes and mixed route behavior for affected travelers
 

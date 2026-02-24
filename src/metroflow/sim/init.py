@@ -170,6 +170,7 @@ def build_initial_simulation_state(
                 "city_link_count": road_csr.link_count,
                 "trip_request_count_init": len(trip_requests.trip_requests),
                 "eager_trip_generation": int(layout_plan.eager_trip_generation),
+                "behavior_profiles": tuple(population.behavior_profiles),
             },
         ),
         dynamic=dynamic,

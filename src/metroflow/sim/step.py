@@ -8,10 +8,19 @@ from typing import Any, Mapping
 import jax.numpy as jnp
 
 from metroflow.demand.trips import TripRequest, TripRequestStatus, activate_trip_requests, generate_trip_requests
+from metroflow.flow.event_effects import apply_active_event_effects_to_link_state
+from metroflow.flow.events import (
+    TrafficEvent,
+    TrafficEventSchedulerState,
+    TrafficEventStatus,
+    advance_traffic_event_scheduler,
+)
 from metroflow.flow.engine import update_link_node_flow
 from metroflow.flow.state import LinkState, NodeState, create_link_state, create_node_state
 from metroflow.learning.policy_blend import PolicyBlendState
+from metroflow.routing.behavior_profiles import generate_route_choice_profiles
 from metroflow.routing.dynamic_potential import build_greedy_route_candidate, compute_dynamic_potential_state
+from metroflow.routing.reroute_policy import decide_reroute_vs_persist
 from metroflow.sim.active_agents import (
     ActiveAgentSlot,
     ActiveAgentPool,
@@ -43,6 +52,7 @@ __all__ = [
 ]
 
 UISnapshotSource = dict[str, Any]
+_US2_EVENTS_REROUTE_INTEGRATED = True
 _LINK_ID_LOOKUP_CACHE: dict[tuple[int, int], jnp.ndarray] = {}
 
 
@@ -81,6 +91,7 @@ def simulation_step(
     next_rng_key, _ = next_key(rng_key)
 
     next_state = _apply_control_to_state(cur_state, cur_control)
+    next_state = _apply_us2_event_and_effects_step_boundary(next_state, cur_control)
     tick_counters = _zero_tick_counters()
     if not cur_control.pause:
         next_state, tick_counters = _run_baseline_tick_orchestration(next_state)
@@ -101,10 +112,23 @@ def simulation_step(
         ui_snapshot_emitted=ui_snapshot_emitted,
         tick_counters=tick_counters,
     )
+    next_dynamic_metadata = (
+        dict(next_state.dynamic.metadata)
+        if isinstance(next_state.dynamic.metadata, Mapping)
+        else {}
+    )
+    for key in (
+        "us2_reroute_decisions_total",
+        "us2_persistence_decisions_total",
+        "us2_corridor_shift_count_total",
+    ):
+        if key in metrics_state:
+            next_dynamic_metadata[key] = int(metrics_state.get(key, 0))
     next_state = next_state.with_dynamic_updates(
         metrics_state=metrics_state,
         invariant_state=invariant_report,
         last_ui_snapshot_source=ui_snapshot_source,
+        metadata=next_dynamic_metadata,
     )
 
     telemetry = _build_step_telemetry(
@@ -301,6 +325,12 @@ def _update_metrics_state_stub(
             + int(counters.get("trip_completed_this_tick", 0)),
             "failed_trips_total": int(metrics.get("failed_trips_total", 0))
             + int(counters.get("trip_failed_this_tick", 0)),
+            "us2_reroute_decisions_total": int(metrics.get("us2_reroute_decisions_total", 0))
+            + int(counters.get("us2_reroute_decisions_this_tick", 0)),
+            "us2_persistence_decisions_total": int(metrics.get("us2_persistence_decisions_total", 0))
+            + int(counters.get("us2_persistence_decisions_this_tick", 0)),
+            "us2_corridor_shift_count_total": int(metrics.get("us2_corridor_shift_count_total", 0))
+            + int(counters.get("us2_corridor_shifts_this_tick", 0)),
         }
     )
     return metrics
@@ -311,7 +341,62 @@ def _zero_tick_counters() -> dict[str, int]:
         "trip_generated_this_tick": 0,
         "trip_completed_this_tick": 0,
         "trip_failed_this_tick": 0,
+        "us2_reroute_decisions_this_tick": 0,
+        "us2_persistence_decisions_this_tick": 0,
+        "us2_corridor_shifts_this_tick": 0,
     }
+
+
+def _apply_us2_event_and_effects_step_boundary(
+    state: SimulationState,
+    control: SimulationControl,
+) -> SimulationState:
+    """US2 step-boundary hook: inject/advance events and apply active effects."""
+
+    if not _is_structured_baseline_state(state):
+        return state
+
+    scheduler_state = _coerce_event_scheduler_state(state.dynamic.event_state)
+    try:
+        injected = _normalize_injected_events(control.inject_event)
+    except (TypeError, ValueError):
+        # Fail-soft on malformed injected event controls at step boundary.
+        injected = ()
+    if injected:
+        scheduler_state = _merge_injected_events(
+            scheduler_state,
+            injected_events=injected,
+        )
+    scheduler_state = advance_traffic_event_scheduler(
+        scheduler_state,
+        current_tick=state.tick_index,
+        clear_event_ids=tuple(control.clear_event_ids),
+    )
+
+    next_link_state = state.dynamic.flow_link_state
+    affected_link_ids: tuple[int, ...] = ()
+    if isinstance(next_link_state, LinkState):
+        routing_static = state.static.routing_static if isinstance(state.static.routing_static, Mapping) else {}
+        road_csr = routing_static.get("road_csr")
+        if road_csr is not None:
+            effects = apply_active_event_effects_to_link_state(
+                road_csr=road_csr,
+                link_state=next_link_state,
+                active_events=scheduler_state.active_events,
+                validate=False,
+            )
+            next_link_state = effects.link_state
+            affected_link_ids = tuple(int(v) for v in effects.affected_link_ids)
+
+    next_metadata = dict(state.dynamic.metadata) if isinstance(state.dynamic.metadata, Mapping) else {}
+    next_metadata["us2_active_event_affected_link_ids"] = affected_link_ids
+    next_metadata["us2_active_event_ids"] = tuple(int(ev.event_id) for ev in scheduler_state.active_events)
+
+    return state.with_dynamic_updates(
+        event_state=scheduler_state,
+        flow_link_state=next_link_state,
+        metadata=next_metadata,
+    )
 
 
 def _run_baseline_tick_orchestration(
@@ -352,6 +437,7 @@ def _run_baseline_tick_orchestration(
         state,
         next_pool,
         host_cache=host_cache,
+        tick_counters=counters,
     )
     counters["trip_completed_this_tick"] += completed_count
     counters["trip_failed_this_tick"] += failed_count
@@ -509,6 +595,7 @@ def _advance_and_complete_active_agents(
     pool: ActiveAgentPool,
     *,
     host_cache: dict[str, Any],
+    tick_counters: dict[str, int] | None = None,
 ) -> tuple[ActiveAgentPool, int, int]:
     if not isinstance(pool, ActiveAgentPool):
         return pool, 0, 0
@@ -521,6 +608,9 @@ def _advance_and_complete_active_agents(
     completed = 0
     failed = 0
     next_pool = pool
+    profile_by_id = _behavior_profile_map_for_state(state, host_cache=host_cache)
+    affected_link_ids = _active_event_affected_link_ids_from_metadata(state.dynamic.metadata)
+    incident_active = bool(affected_link_ids) and _has_active_traffic_events(state.dynamic.event_state)
     alive_mask = jnp.asarray(pool.alive_mask, dtype=jnp.bool_)
     progress_candidate = jnp.asarray(pool.progress_01, dtype=jnp.float32) + 0.5
     ready_mask = alive_mask & (progress_candidate >= 1.0)
@@ -555,13 +645,58 @@ def _advance_and_complete_active_agents(
             completed += 1
             continue
 
-        if route_ptr < len(route):
-            next_link_id = int(route[route_ptr])
+        updated_route = route
+        updated_route_ptr = route_ptr
+        updated_cooldown = int(next_pool.reroute_cooldown_ticks[slot_id])
+        if incident_active and route_ptr < len(route) and _route_intersects_affected_links(
+            current_link_id=current_link_id,
+            route=route,
+            route_ptr=route_ptr,
+            affected_link_ids=affected_link_ids,
+        ):
+            reroute_out = _maybe_reroute_active_trip_at_link_boundary(
+                state=state,
+                road_csr=road_csr,
+                flow_link_state=state.dynamic.flow_link_state,
+                host_cache=host_cache,
+                profile_by_id=profile_by_id,
+                active_routes=active_routes,
+                trip_id=trip_id,
+                current_link=current_link,
+                dest_node_id=dest_node_id,
+                route=route,
+                route_ptr=route_ptr,
+                behavior_profile_id=int(next_pool.behavior_profile_id[slot_id]),
+                reroute_cooldown_ticks=int(next_pool.reroute_cooldown_ticks[slot_id]),
+                affected_link_ids=affected_link_ids,
+                tick_counters=tick_counters,
+            )
+            if tick_counters is not None and bool(reroute_out.get("decision_evaluated", False)):
+                if bool(reroute_out.get("did_reroute", False)):
+                    tick_counters["us2_reroute_decisions_this_tick"] = int(
+                        tick_counters.get("us2_reroute_decisions_this_tick", 0)
+                    ) + 1
+                else:
+                    tick_counters["us2_persistence_decisions_this_tick"] = int(
+                        tick_counters.get("us2_persistence_decisions_this_tick", 0)
+                    ) + 1
+                if bool(reroute_out.get("corridor_shifted", False)):
+                    tick_counters["us2_corridor_shifts_this_tick"] = int(
+                        tick_counters.get("us2_corridor_shifts_this_tick", 0)
+                    ) + 1
+            updated_route = reroute_out["route"]
+            updated_route_ptr = int(reroute_out["route_ptr"])
+            updated_cooldown = int(reroute_out["next_cooldown"])
+            active_routes[trip_id] = tuple(int(x) for x in updated_route)
+
+        if updated_route_ptr < len(updated_route):
+            next_link_id = int(updated_route[updated_route_ptr])
             next_pool = replace(
                 next_pool,
                 current_link_id=next_pool.current_link_id.at[slot_id].set(next_link_id),
                 progress_01=next_pool.progress_01.at[slot_id].set(0.0),
-                remaining_route_ptr=next_pool.remaining_route_ptr.at[slot_id].set(route_ptr + 1),
+                remaining_route_ptr=next_pool.remaining_route_ptr.at[slot_id].set(updated_route_ptr + 1),
+                reroute_cooldown_ticks=next_pool.reroute_cooldown_ticks.at[slot_id].set(updated_cooldown),
             )
             continue
 
@@ -707,6 +842,257 @@ def _trip_generation_context(
     }
     host_cache["trip_generation_context"] = context
     return context
+
+
+def _coerce_event_scheduler_state(event_state: Any) -> TrafficEventSchedulerState:
+    if isinstance(event_state, TrafficEventSchedulerState):
+        return event_state
+    if isinstance(event_state, Mapping):
+        return TrafficEventSchedulerState(**dict(event_state))
+    return TrafficEventSchedulerState()
+
+
+def _normalize_injected_events(raw: Any) -> tuple[TrafficEvent, ...]:
+    if raw is None:
+        return ()
+    if isinstance(raw, tuple):
+        items = raw
+    elif isinstance(raw, list):
+        items = tuple(raw)
+    else:
+        items = (raw,)
+    out: list[TrafficEvent] = []
+    for item in items:
+        if item is None:
+            continue
+        if isinstance(item, TrafficEvent):
+            ev = item
+        elif isinstance(item, Mapping):
+            ev = TrafficEvent(**dict(item))
+        else:
+            raise TypeError("inject_event items must be TrafficEvent or Mapping")
+        if ev.status is not TrafficEventStatus.SCHEDULED:
+            ev = replace(ev, status=TrafficEventStatus.SCHEDULED)
+        out.append(ev)
+    return tuple(out)
+
+
+def _merge_injected_events(
+    scheduler_state: TrafficEventSchedulerState,
+    *,
+    injected_events: tuple[TrafficEvent, ...],
+) -> TrafficEventSchedulerState:
+    if not injected_events:
+        return scheduler_state
+    replace_ids = {int(ev.event_id) for ev in injected_events}
+    scheduled = tuple(
+        ev for ev in scheduler_state.scheduled_events if int(ev.event_id) not in replace_ids
+    )
+    active = tuple(
+        ev for ev in scheduler_state.active_events if int(ev.event_id) not in replace_ids
+    )
+    cleared = tuple(
+        ev for ev in scheduler_state.cleared_events if int(ev.event_id) not in replace_ids
+    )
+    return TrafficEventSchedulerState(
+        scheduled_events=(*scheduled, *injected_events),
+        active_events=active,
+        cleared_events=cleared,
+    )
+
+
+def _has_active_traffic_events(event_state: Any) -> bool:
+    if event_state is None:
+        return False
+    active = _lookup_attr_or_key(event_state, "active_events")
+    if active is None:
+        return False
+    try:
+        return len(tuple(active)) > 0
+    except TypeError:
+        return False
+
+
+def _behavior_profile_map_for_state(
+    state: SimulationState,
+    *,
+    host_cache: dict[str, Any],
+) -> dict[int, Any]:
+    cached = host_cache.get("behavior_profile_map")
+    static_meta = state.static.metadata if isinstance(state.static.metadata, Mapping) else {}
+    explicit_profiles = static_meta.get("behavior_profiles")
+    if explicit_profiles is not None:
+        try:
+            explicit_tuple = tuple(explicit_profiles)
+        except TypeError:
+            explicit_tuple = ()
+    else:
+        explicit_tuple = ()
+    signature = (
+        "explicit" if explicit_tuple else "generated",
+        id(explicit_tuple) if explicit_tuple else id(state.static.population),
+        int(state.metadata.get("scenario_seed", state.config.random_seed)),
+        int(_max_behavior_profile_id_cached(state.static.population, host_cache=host_cache)),
+    )
+    if isinstance(cached, dict) and cached.get("signature") == signature:
+        profiles = cached.get("profiles")
+        if isinstance(profiles, Mapping):
+            return dict(profiles)
+
+    if explicit_tuple:
+        profiles = explicit_tuple
+    else:
+        max_id = max(1, int(signature[3]))
+        profiles = generate_route_choice_profiles(seed=int(signature[2]), count=max_id)
+    profile_map = {int(p.behavior_profile_id): p for p in profiles}
+    host_cache["behavior_profile_map"] = {
+        "signature": signature,
+        "profiles": dict(profile_map),
+    }
+    return profile_map
+
+
+def _max_behavior_profile_id_cached(population: Any, *, host_cache: dict[str, Any]) -> int:
+    cached = host_cache.get("behavior_profile_max_id")
+    signature = id(population)
+    if isinstance(cached, dict) and int(cached.get("population_id", -1)) == int(signature):
+        return int(cached.get("value", 0))
+    value = _max_behavior_profile_id(population)
+    host_cache["behavior_profile_max_id"] = {"population_id": int(signature), "value": int(value)}
+    return int(value)
+
+
+def _max_behavior_profile_id(population: Any) -> int:
+    max_id = 0
+    try:
+        people = tuple(population or ())
+    except TypeError:
+        return 0
+    for citizen in people:
+        value = _lookup_attr_or_key(citizen, "behavior_profile_id")
+        if value is None:
+            continue
+        try:
+            max_id = max(max_id, int(value))
+        except Exception:
+            continue
+    return max_id
+
+
+def _active_event_affected_link_ids_from_metadata(metadata: Any) -> frozenset[int]:
+    if not isinstance(metadata, Mapping):
+        return frozenset()
+    raw = metadata.get("us2_active_event_affected_link_ids", ())
+    try:
+        return frozenset(int(v) for v in tuple(raw))
+    except Exception:
+        return frozenset()
+
+
+def _route_intersects_affected_links(
+    *,
+    current_link_id: int,
+    route: tuple[int, ...],
+    route_ptr: int,
+    affected_link_ids: frozenset[int],
+) -> bool:
+    if not affected_link_ids:
+        return False
+    if int(current_link_id) in affected_link_ids:
+        return True
+    tail = route[max(0, int(route_ptr)) :]
+    return any(int(link_id) in affected_link_ids for link_id in tail)
+
+
+def _maybe_reroute_active_trip_at_link_boundary(
+    *,
+    state: SimulationState,
+    road_csr: Any,
+    flow_link_state: Any,
+    host_cache: dict[str, Any],
+    profile_by_id: Mapping[int, Any],
+    active_routes: dict[int, tuple[int, ...]],
+    trip_id: int,
+    current_link: Any,
+    dest_node_id: int,
+    route: tuple[int, ...],
+    route_ptr: int,
+    behavior_profile_id: int,
+    reroute_cooldown_ticks: int,
+    affected_link_ids: frozenset[int],
+    tick_counters: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    out = {
+        "route": route,
+        "route_ptr": route_ptr,
+        "next_cooldown": max(0, int(reroute_cooldown_ticks)),
+        "decision_evaluated": False,
+        "did_reroute": False,
+        "corridor_shifted": False,
+    }
+    if not isinstance(flow_link_state, LinkState):
+        return out
+    if route_ptr >= len(route):
+        return out
+    profile = profile_by_id.get(int(behavior_profile_id))
+    if profile is None:
+        return out
+    origin_node_id = int(getattr(current_link, "dst_node_id", -1))
+    if origin_node_id < 0:
+        return out
+
+    dynamic_potential_cache = host_cache.setdefault("dynamic_potential_cache", {})
+    potential = compute_dynamic_potential_state(
+        road_csr,
+        destination_node_id=int(dest_node_id),
+        link_state=flow_link_state,
+        cache=dynamic_potential_cache,
+        cache_key=("dest", int(dest_node_id)),
+    )
+    candidate_route = build_greedy_route_candidate(
+        road_csr,
+        potential,
+        origin_node_id=origin_node_id,
+    )
+    if not candidate_route:
+        return out
+
+    current_remaining_cost = _sum_route_link_costs(route[route_ptr:], road_csr=road_csr, flow_link_state=flow_link_state)
+    candidate_remaining_cost = _sum_route_link_costs(candidate_route, road_csr=road_csr, flow_link_state=flow_link_state)
+    decision = decide_reroute_vs_persist(
+        profile=profile,
+        current_remaining_cost=current_remaining_cost,
+        candidate_remaining_cost=candidate_remaining_cost,
+        incident_active=True,
+        reroute_cooldown_ticks=int(reroute_cooldown_ticks),
+    )
+    out["decision_evaluated"] = True
+    out["next_cooldown"] = int(decision.next_reroute_cooldown_ticks)
+    if not bool(decision.should_reroute):
+        return out
+
+    rerouted_full = (int(getattr(current_link, "link_id")),) + tuple(int(x) for x in candidate_route)
+    out["did_reroute"] = True
+    current_affected_exposure = sum(1 for link_id in route[route_ptr:] if int(link_id) in affected_link_ids)
+    candidate_affected_exposure = sum(1 for link_id in candidate_route if int(link_id) in affected_link_ids)
+    out["corridor_shifted"] = bool(candidate_affected_exposure < current_affected_exposure)
+    active_routes[int(trip_id)] = rerouted_full
+    out["route"] = rerouted_full
+    out["route_ptr"] = 1
+    return out
+
+
+def _sum_route_link_costs(route_link_ids: tuple[int, ...], *, road_csr: Any, flow_link_state: LinkState) -> float:
+    if not route_link_ids:
+        return float("inf")
+    total = 0.0
+    travel_cost = jnp.asarray(flow_link_state.travel_time_cost, dtype=jnp.float32)
+    for link_id in route_link_ids:
+        idx = road_csr.link_id_to_index.get(int(link_id))
+        if idx is None:
+            return float("inf")
+        total += float(travel_cost[int(idx)])
+    return float(total)
 
 
 def _remap_trip_request_ids(

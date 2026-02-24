@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from metroflow.sim.control import SimulationControl
-from metroflow.ui.packets import UIPacketEnvelope, UIPacketType, build_ui_packet_envelope
+from metroflow.ui.packets import UIPacketEnvelope, UIPacketType, build_ui_control_ack_packet as _build_ack_packet
 
 __all__ = [
     "UIControlCommandParseResult",
@@ -129,26 +129,17 @@ def build_ui_control_ack_packet(
     reason: str | None = None,
     applied_tick: int | None = None,
 ) -> UIPacketEnvelope:
-    """Build a `ui.control_ack` envelope payload matching the packet contract."""
+    """Backward-compatible wrapper delegating to `ui.packets` builder (T053)."""
 
-    payload: dict[str, Any] = {
-        "command_id": str(command_id),
-        "accepted": bool(accepted),
-    }
-    if reason:
-        payload["reason"] = str(reason)
-    if applied_tick is not None and not accepted:
-        raise ValueError("applied_tick is only valid for accepted control acks")
-    if applied_tick is not None:
-        payload["applied_tick"] = int(applied_tick)
-
-    return build_ui_packet_envelope(
-        packet_type=UIPacketType.CONTROL_ACK,
+    return _build_ack_packet(
         run_id=run_id,
         tick=tick,
         day_type=day_type,
         time_band=time_band,
-        payload=payload,
+        command_id=command_id,
+        accepted=accepted,
+        reason=reason,
+        applied_tick=applied_tick,
     )
 
 

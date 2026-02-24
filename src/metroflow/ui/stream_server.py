@@ -6,7 +6,13 @@ from typing import Any, Mapping
 from metroflow.sim.control import SimulationControl, SimulationTelemetry
 from metroflow.sim.state import SimulationState
 from metroflow.ui.control_adapter import build_ui_control_ack_packet, parse_ui_control_command
-from metroflow.ui.packets import UIPacketEnvelope, UIPacketType, build_ui_packet_envelope
+from metroflow.ui.packets import (
+    UIPacketEnvelope,
+    UIPacketType,
+    build_ui_event_overlay_packet,
+    build_ui_packet_envelope,
+    normalize_ui_event_overlay_item as _normalize_event_overlay_item_shared,
+)
 from metroflow.ui.stream_buffer import UISnapshotEmission, UISnapshotStreamBuffer
 
 __all__ = [
@@ -160,24 +166,22 @@ class NavigatorUIStreamServer:
                 return None
             # Emit a one-time clear packet so the UI can remove stale overlays.
             self._last_event_signature = ()
-            return build_ui_packet_envelope(
-                packet_type=UIPacketType.EVENT_OVERLAY,
+            return build_ui_event_overlay_packet(
                 run_id=_run_id_from_state(state),
                 tick=state.tick_index,
                 day_type=state.day_type,
                 time_band=state.time_band,
-                payload={"events": ()},
+                events=(),
             )
         if signature == self._last_event_signature:
             return None
         self._last_event_signature = signature
-        return build_ui_packet_envelope(
-            packet_type=UIPacketType.EVENT_OVERLAY,
+        return build_ui_event_overlay_packet(
             run_id=_run_id_from_state(state),
             tick=state.tick_index,
             day_type=state.day_type,
             time_band=state.time_band,
-            payload={"events": tuple(_normalize_event_overlay_item(e) for e in active_events)},
+            events=active_events,
         )
 
     def _maybe_metrics_summary_packet(
@@ -346,18 +350,5 @@ def _event_signature(event: Any) -> str:
 
 
 def _normalize_event_overlay_item(event: Any) -> dict[str, Any]:
-    if isinstance(event, Mapping):
-        return {
-            "event_id": int(event.get("event_id", 0) or 0),
-            "event_type": str(event.get("event_type", "unknown")),
-            "status": str(event.get("status", "active")),
-            "severity": str(event.get("severity", "medium")),
-            "target_scope": event.get("target_scope", {}),
-        }
-    return {
-        "event_id": 0,
-        "event_type": "unknown",
-        "status": "active",
-        "severity": "medium",
-        "target_scope": {"repr": str(event)},
-    }
+    # Keep private helper as a compatibility alias to the shared packet normalizer.
+    return _normalize_event_overlay_item_shared(event)
