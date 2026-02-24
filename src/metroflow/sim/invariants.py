@@ -375,7 +375,7 @@ def _extract_conservation_snapshot(state: SimulationState) -> ConservationSnapsh
         metrics_state,
         dynamic.metadata,
         state.metadata,
-        keys=("queued_trip_requests", "pending_trip_requests"),
+        keys=("pending_trip_requests", "queued_trip_requests"),
     )
     completed_total = _lookup_first(
         metrics_state,

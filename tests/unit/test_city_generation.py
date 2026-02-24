@@ -7,8 +7,11 @@ from metroflow.city.graph import (
     Node,
     RoadClass,
     RoadLink,
+    NodeKind,
     validate_road_network_topology,
 )
+from metroflow.city.generator import generate_synthetic_city_topology
+from metroflow.city.zones import POIType, generate_zones_and_pois
 from metroflow.sim.config import CityGenerationConfig, RoadHierarchyClass, ZoneType
 
 
@@ -104,3 +107,75 @@ def test_topology_validator_reports_bridge_crossing_group_mismatch():
     assert report.ok is False
     assert any(issue.code == "bridge_crossing_group_mismatch" for issue in report.issues)
 
+
+def test_synthetic_city_topology_generator_builds_valid_hierarchy_bridge_and_ramp_layout():
+    topology = generate_synthetic_city_topology(
+        CityGenerationConfig(
+            ring_road_count=1,
+            radial_corridor_count=4,
+            barrier_count=2,
+            bridge_count=4,
+            interchange_density_profile="high",
+        ),
+        seed=7,
+    )
+
+    report = topology.validate()
+    assert report.ok is True
+
+    road_classes = {link.road_class for link in topology.links}
+    assert {
+        RoadClass.LOCAL,
+        RoadClass.ARTERIAL,
+        RoadClass.EXPRESSWAY,
+        RoadClass.RAMP,
+        RoadClass.BRIDGE,
+    } <= road_classes
+
+    node_kinds = {node.kind for node in topology.nodes}
+    assert {
+        NodeKind.INTERCHANGE,
+        NodeKind.RAMP_SPLIT,
+        NodeKind.RAMP_MERGE,
+        NodeKind.BRIDGE_ENDPOINT,
+    } <= node_kinds
+
+    assert len(topology.bridge_crossings) == 4
+    assert {crossing.barrier_id for crossing in topology.bridge_crossings} == {1, 2}
+    assert any(link.length_m > 1.0 for link in topology.links)
+    bridge_endpoint_y = {
+        node.y for node in topology.nodes if node.kind == NodeKind.BRIDGE_ENDPOINT
+    }
+    assert len(bridge_endpoint_y) >= 4  # multiple bridge bands/endpoints, not a single label-only barrier
+    assert topology.build_csr().link_count == len(topology.links)
+
+
+def test_zoning_and_poi_generation_covers_all_zone_types_and_valid_node_anchors():
+    topology = generate_synthetic_city_topology(
+        CityGenerationConfig(bridge_count=3, radial_corridor_count=4),
+        seed=11,
+    )
+    zoning = generate_zones_and_pois(
+        topology,
+        CityGenerationConfig(
+            zone_mix_targets={
+                ZoneType.RESIDENTIAL: 0.4,
+                ZoneType.CBD_COMMERCIAL: 0.2,
+                ZoneType.INDUSTRIAL: 0.2,
+                ZoneType.MIXED_USE: 0.2,
+            },
+            poi_density_profile="baseline",
+        ),
+        seed=11,
+        population_target=1_000,
+    )
+
+    assert zoning.validate(topology=topology) == ()
+    assert zoning.metadata["population_target"] == 1_000
+    assert {zone.zone_type for zone in zoning.zones} == set(ZoneType)
+    assert {poi.poi_type for poi in zoning.pois} == set(POIType)
+    residential_zone = next(zone for zone in zoning.zones if zone.zone_type == ZoneType.RESIDENTIAL)
+    assert residential_zone.population_capacity == 400
+    assert len(zoning.node_zone_by_id) == len(topology.nodes)
+    topology_node_ids = {node.node_id for node in topology.nodes}
+    assert all(poi.node_id in topology_node_ids for poi in zoning.pois)

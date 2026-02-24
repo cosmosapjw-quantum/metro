@@ -35,17 +35,17 @@ def test_us1_baseline_simulation_smoke_forced_snapshot_exposes_topology_and_cong
     assert telemetry.ui_snapshot_emitted is True
     assert isinstance(ui_snapshot_source, dict)
 
-    # Topology/congestion outputs are placeholders until T037, but keys/shape are fixed.
+    # T037 populates the pre-packet UI snapshot source with topology/congestion/metrics.
     assert "network_geometry_version" in ui_snapshot_source
     assert "sampled_link_congestion" in ui_snapshot_source
     assert "summary_metrics" in ui_snapshot_source
     assert isinstance(ui_snapshot_source["sampled_link_congestion"], tuple)
     assert set(ui_snapshot_source["clock_state"]) == {"day_type", "time_band", "sim_tick"}
-    assert set(ui_snapshot_source["summary_metrics"]) == {
+    assert {
         "active_agents",
         "capacity_violation_count",
         "negative_queue_detected",
-    }
+    }.issubset(set(ui_snapshot_source["summary_metrics"]))
 
 
 def test_us1_baseline_rollout_smoke_keeps_core_invariants_green():
@@ -79,4 +79,3 @@ def test_us1_baseline_rollout_smoke_keeps_core_invariants_green():
     assert any(item.ui_snapshot_emitted for item in telemetry_log)
     assert invariant_report.ok is True
     assert invariant_report.counters.total_violations == 0
-
