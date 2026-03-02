@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from metroflow.ui.packets import (
     UIPacketEnvelope,
     UIPacketType,

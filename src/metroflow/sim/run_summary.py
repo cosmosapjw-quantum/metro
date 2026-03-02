@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+import jax.numpy as jnp
 import numpy as np
 
 from metroflow.flow.state import LinkState
@@ -12,7 +13,11 @@ from metroflow.sim.state import SimulationState
 
 __all__ = [
     "BaselineRunSummary",
+    "RunSummaryComparison",
     "build_baseline_run_summary",
+    "build_run_summary_comparison",
+    "format_run_summary_comparison_markdown",
+    "run_summary_comparison_deltas_core",
 ]
 
 
@@ -72,6 +77,68 @@ class BaselineRunSummary:
         self.corridor_shift_count = int(self.corridor_shift_count)
         self.corridor_shift_share = float(self.corridor_shift_share)
         self.disruption_response_metrics_available = bool(self.disruption_response_metrics_available)
+
+    @property
+    def completed_trips_total(self) -> int:
+        return int(self.trip_completed_total)
+
+    @property
+    def failed_trips_total(self) -> int:
+        return int(self.trip_failed_total)
+
+    @property
+    def trip_completion_rate(self) -> float:
+        generated = max(0, int(self.trip_generation_total))
+        return float(self.trip_completed_total / generated) if generated > 0 else 0.0
+
+    @property
+    def trip_failure_rate(self) -> float:
+        generated = max(0, int(self.trip_generation_total))
+        return float(self.trip_failed_total / generated) if generated > 0 else 0.0
+
+
+@dataclass(slots=True)
+class RunSummaryComparison:
+    """Baseline vs adaptive experiment comparison payload."""
+
+    scenario_id: str
+    seed: int | None
+    baseline_summary: BaselineRunSummary
+    adaptive_summary: BaselineRunSummary
+    trip_completed_total_delta: int
+    trip_failed_total_delta: int
+    trip_completion_rate_delta: float
+    trip_failure_rate_delta: float
+    active_agents_delta: int
+    queued_trip_requests_delta: int
+    pending_trip_requests_delta: int
+    capacity_violation_count_delta: int
+    reroute_share_delta: float
+    persistence_share_delta: float
+    corridor_shift_share_delta: float
+
+    def __post_init__(self) -> None:
+        self.scenario_id = str(self.scenario_id)
+        self.seed = None if self.seed is None else int(self.seed)
+        self.trip_completed_total_delta = int(self.trip_completed_total_delta)
+        self.trip_failed_total_delta = int(self.trip_failed_total_delta)
+        self.trip_completion_rate_delta = float(self.trip_completion_rate_delta)
+        self.trip_failure_rate_delta = float(self.trip_failure_rate_delta)
+        self.active_agents_delta = int(self.active_agents_delta)
+        self.queued_trip_requests_delta = int(self.queued_trip_requests_delta)
+        self.pending_trip_requests_delta = int(self.pending_trip_requests_delta)
+        self.capacity_violation_count_delta = int(self.capacity_violation_count_delta)
+        self.reroute_share_delta = float(self.reroute_share_delta)
+        self.persistence_share_delta = float(self.persistence_share_delta)
+        self.corridor_shift_share_delta = float(self.corridor_shift_share_delta)
+
+    @property
+    def adaptive_improved_completion(self) -> bool:
+        return self.trip_completion_rate_delta > 0.0
+
+    @property
+    def adaptive_reduced_failures(self) -> bool:
+        return self.trip_failed_total_delta < 0
 
 
 def build_baseline_run_summary(
@@ -155,6 +222,159 @@ def build_baseline_run_summary(
     )
 
 
+def build_run_summary_comparison(
+    baseline_summary: BaselineRunSummary | Mapping[str, Any],
+    adaptive_summary: BaselineRunSummary | Mapping[str, Any],
+) -> RunSummaryComparison:
+    """Build a host-side baseline-vs-adaptive comparison payload from two run summaries."""
+
+    baseline = _coerce_baseline_run_summary(baseline_summary)
+    adaptive = _coerce_baseline_run_summary(adaptive_summary)
+    _validate_comparable_run_summaries(baseline, adaptive)
+    deltas = run_summary_comparison_deltas_core(
+        baseline_trip_generation_total=baseline.trip_generation_total,
+        adaptive_trip_generation_total=adaptive.trip_generation_total,
+        baseline_trip_completed_total=baseline.trip_completed_total,
+        adaptive_trip_completed_total=adaptive.trip_completed_total,
+        baseline_trip_failed_total=baseline.trip_failed_total,
+        adaptive_trip_failed_total=adaptive.trip_failed_total,
+        baseline_active_agents=baseline.active_agents,
+        adaptive_active_agents=adaptive.active_agents,
+        baseline_queued_trip_requests=baseline.queued_trip_requests,
+        adaptive_queued_trip_requests=adaptive.queued_trip_requests,
+        baseline_pending_trip_requests=baseline.pending_trip_requests,
+        adaptive_pending_trip_requests=adaptive.pending_trip_requests,
+        baseline_capacity_violation_count=baseline.capacity_violation_count,
+        adaptive_capacity_violation_count=adaptive.capacity_violation_count,
+        baseline_reroute_share=baseline.reroute_share,
+        adaptive_reroute_share=adaptive.reroute_share,
+        baseline_persistence_share=baseline.persistence_share,
+        adaptive_persistence_share=adaptive.persistence_share,
+        baseline_corridor_shift_share=baseline.corridor_shift_share,
+        adaptive_corridor_shift_share=adaptive.corridor_shift_share,
+    )
+    return RunSummaryComparison(
+        scenario_id=baseline.scenario_id,
+        seed=baseline.seed,
+        baseline_summary=baseline,
+        adaptive_summary=adaptive,
+        trip_completed_total_delta=int(deltas[0]),
+        trip_failed_total_delta=int(deltas[1]),
+        trip_completion_rate_delta=float(deltas[2]),
+        trip_failure_rate_delta=float(deltas[3]),
+        active_agents_delta=int(deltas[4]),
+        queued_trip_requests_delta=int(deltas[5]),
+        pending_trip_requests_delta=int(deltas[6]),
+        capacity_violation_count_delta=int(deltas[7]),
+        reroute_share_delta=float(deltas[8]),
+        persistence_share_delta=float(deltas[9]),
+        corridor_shift_share_delta=float(deltas[10]),
+    )
+
+
+def format_run_summary_comparison_markdown(comparison: RunSummaryComparison) -> str:
+    """Render a short markdown comparison for baseline vs adaptive experiments."""
+
+    return "\n".join(
+        [
+            f"- Scenario ID: {comparison.scenario_id}",
+            f"- Seed: {_fmt_value(comparison.seed)}",
+            f"- Completed trips delta (adaptive - baseline): {comparison.trip_completed_total_delta:+d}",
+            f"- Failed trips delta (adaptive - baseline): {comparison.trip_failed_total_delta:+d}",
+            (
+                "- Completion rate delta (adaptive - baseline): "
+                f"{comparison.trip_completion_rate_delta:+.6f}"
+            ),
+            (
+                "- Failure rate delta (adaptive - baseline): "
+                f"{comparison.trip_failure_rate_delta:+.6f}"
+            ),
+            f"- Active agents delta (adaptive - baseline): {comparison.active_agents_delta:+d}",
+            f"- Queued trips delta (adaptive - baseline): {comparison.queued_trip_requests_delta:+d}",
+            f"- Pending trips delta (adaptive - baseline): {comparison.pending_trip_requests_delta:+d}",
+            (
+                "- Capacity violation delta (adaptive - baseline): "
+                f"{comparison.capacity_violation_count_delta:+d}"
+            ),
+            f"- Reroute share delta (adaptive - baseline): {comparison.reroute_share_delta:+.6f}",
+            (
+                "- Persistence share delta (adaptive - baseline): "
+                f"{comparison.persistence_share_delta:+.6f}"
+            ),
+            (
+                "- Corridor shift share delta (adaptive - baseline): "
+                f"{comparison.corridor_shift_share_delta:+.6f}"
+            ),
+        ]
+    )
+
+
+def run_summary_comparison_deltas_core(
+    *,
+    baseline_trip_generation_total: Any,
+    adaptive_trip_generation_total: Any,
+    baseline_trip_completed_total: Any,
+    adaptive_trip_completed_total: Any,
+    baseline_trip_failed_total: Any,
+    adaptive_trip_failed_total: Any,
+    baseline_active_agents: Any,
+    adaptive_active_agents: Any,
+    baseline_queued_trip_requests: Any,
+    adaptive_queued_trip_requests: Any,
+    baseline_pending_trip_requests: Any,
+    adaptive_pending_trip_requests: Any,
+    baseline_capacity_violation_count: Any,
+    adaptive_capacity_violation_count: Any,
+    baseline_reroute_share: Any,
+    adaptive_reroute_share: Any,
+    baseline_persistence_share: Any,
+    adaptive_persistence_share: Any,
+    baseline_corridor_shift_share: Any,
+    adaptive_corridor_shift_share: Any,
+) -> tuple[Any, ...]:
+    """JAX-friendly delta core for run summary comparisons."""
+
+    baseline_generated = jnp.maximum(jnp.asarray(baseline_trip_generation_total), 0)
+    adaptive_generated = jnp.maximum(jnp.asarray(adaptive_trip_generation_total), 0)
+    baseline_completed = jnp.asarray(baseline_trip_completed_total)
+    adaptive_completed = jnp.asarray(adaptive_trip_completed_total)
+    baseline_failed = jnp.asarray(baseline_trip_failed_total)
+    adaptive_failed = jnp.asarray(adaptive_trip_failed_total)
+    baseline_completion_rate = jnp.where(
+        baseline_generated > 0,
+        baseline_completed / baseline_generated,
+        jnp.asarray(0.0, dtype=jnp.float32),
+    )
+    adaptive_completion_rate = jnp.where(
+        adaptive_generated > 0,
+        adaptive_completed / adaptive_generated,
+        jnp.asarray(0.0, dtype=jnp.float32),
+    )
+    baseline_failure_rate = jnp.where(
+        baseline_generated > 0,
+        baseline_failed / baseline_generated,
+        jnp.asarray(0.0, dtype=jnp.float32),
+    )
+    adaptive_failure_rate = jnp.where(
+        adaptive_generated > 0,
+        adaptive_failed / adaptive_generated,
+        jnp.asarray(0.0, dtype=jnp.float32),
+    )
+    return (
+        adaptive_completed - baseline_completed,
+        adaptive_failed - baseline_failed,
+        adaptive_completion_rate - baseline_completion_rate,
+        adaptive_failure_rate - baseline_failure_rate,
+        jnp.asarray(adaptive_active_agents) - jnp.asarray(baseline_active_agents),
+        jnp.asarray(adaptive_queued_trip_requests) - jnp.asarray(baseline_queued_trip_requests),
+        jnp.asarray(adaptive_pending_trip_requests) - jnp.asarray(baseline_pending_trip_requests),
+        jnp.asarray(adaptive_capacity_violation_count) - jnp.asarray(baseline_capacity_violation_count),
+        jnp.asarray(adaptive_reroute_share) - jnp.asarray(baseline_reroute_share),
+        jnp.asarray(adaptive_persistence_share) - jnp.asarray(baseline_persistence_share),
+        jnp.asarray(adaptive_corridor_shift_share) - jnp.asarray(baseline_corridor_shift_share),
+    )
+
+
 def _extract_seed(state: SimulationState) -> int | None:
     for container in (state.metadata, getattr(state.static, "metadata", {}), getattr(state.dynamic, "metadata", {})):
         if isinstance(container, Mapping) and "scenario_seed" in container:
@@ -163,6 +383,36 @@ def _extract_seed(state: SimulationState) -> int | None:
             except Exception:
                 continue
     return None
+
+
+def _coerce_baseline_run_summary(value: BaselineRunSummary | Mapping[str, Any]) -> BaselineRunSummary:
+    if isinstance(value, BaselineRunSummary):
+        return value
+    return BaselineRunSummary(**value)
+
+
+def _validate_comparable_run_summaries(
+    baseline: BaselineRunSummary,
+    adaptive: BaselineRunSummary,
+) -> None:
+    mismatches: list[str] = []
+    if baseline.scenario_id != adaptive.scenario_id:
+        mismatches.append(
+            f"scenario_id mismatch ({baseline.scenario_id!r} != {adaptive.scenario_id!r})"
+        )
+    if baseline.seed != adaptive.seed:
+        mismatches.append(f"seed mismatch ({baseline.seed!r} != {adaptive.seed!r})")
+    if baseline.day_type != adaptive.day_type:
+        mismatches.append(f"day_type mismatch ({baseline.day_type!r} != {adaptive.day_type!r})")
+    if baseline.time_band != adaptive.time_band:
+        mismatches.append(f"time_band mismatch ({baseline.time_band!r} != {adaptive.time_band!r})")
+    if baseline.trip_generation_total != adaptive.trip_generation_total:
+        mismatches.append(
+            "trip_generation_total mismatch "
+            f"({baseline.trip_generation_total!r} != {adaptive.trip_generation_total!r})"
+        )
+    if mismatches:
+        raise ValueError("baseline/adaptive run summaries are not comparable: " + ", ".join(mismatches))
 
 
 def _alive_count_fallback(state: SimulationState) -> int:
@@ -214,6 +464,10 @@ def _safe_len(value: Any) -> int:
         return int(len(value))
     except Exception:
         return sum(1 for _ in value)
+
+
+def _fmt_value(value: Any) -> str:
+    return "N/A" if value is None else str(value)
 
 
 def _hotspot_links_top_k(state: SimulationState, *, k: int) -> tuple[dict[str, Any], ...]:

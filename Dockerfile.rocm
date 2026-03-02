@@ -12,9 +12,12 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY tests ./tests
 
+# Install repo tooling explicitly without touching the ROCm JAX stack.
+RUN pip install pytest ruff
+
 # IMPORTANT:
 # Your pyproject currently depends on `jax`/`jaxlib`. This base image already has the ROCm-enabled stack.
 # Install your package WITHOUT pulling deps, so you don't accidentally overwrite ROCm JAX with CPU wheels.
 RUN pip install --no-deps -e .
 
-CMD ["python", "-m", "metroflow.demo"]a
+CMD ["python", "-m", "metroflow.demo"]

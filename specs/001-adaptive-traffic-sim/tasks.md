@@ -137,23 +137,23 @@ description: "Task list for Adaptive Traffic Simulation for Virtual City"
 
 ### Tests for User Story 3
 
-- [ ] T056 [P] [US3] Add contract tests for adaptive policy plugin init/score/update boundaries in `tests/contract/test_policy_plugin_contract.py`
-- [ ] T057 [P] [US3] Add unit tests for OD-UCB arm selection and online reward updates in `tests/unit/test_od_ucb_bandit.py`
-- [ ] T058 [P] [US3] Add integration tests for baseline/adaptive mixing and fallback-to-baseline safety behavior in `tests/integration/test_us3_policy_blend_fallback.py`
-- [ ] T059 [P] [US3] Add reproducibility tests for fixed-seed repeated runs with identical controls/events in `tests/integration/test_us3_reproducibility.py`
-- [ ] T060 [P] [US3] Add benchmark smoke test/report parsing checks for 100k scenario metrics in `tests/benchmarks/test_us3_benchmark_report.py`
+- [X] T056 [P] [US3] Add contract tests for adaptive policy plugin init/score/update boundaries in `tests/contract/test_policy_plugin_contract.py`
+- [X] T057 [P] [US3] Add unit tests for OD-UCB arm selection and online reward updates in `tests/unit/test_od_ucb_bandit.py`
+- [X] T058 [P] [US3] Add integration tests for baseline/adaptive mixing and fallback-to-baseline safety behavior in `tests/integration/test_us3_policy_blend_fallback.py`
+- [X] T059 [P] [US3] Add reproducibility tests for fixed-seed repeated runs with identical controls/events in `tests/integration/test_us3_reproducibility.py`
+- [X] T060 [P] [US3] Add benchmark smoke test/report parsing checks for 100k scenario metrics in `tests/benchmarks/test_us3_benchmark_report.py`
 
 ### Implementation for User Story 3
 
-- [ ] T061 [P] [US3] Implement adaptive policy plugin interface and registry in `src/metroflow/learning/plugins.py`
-- [ ] T062 [P] [US3] Implement OD route candidate set state and refresh policy in `src/metroflow/routing/candidates.py`
-- [ ] T063 [US3] Implement OD-UCB bandit policy state and online update logic in `src/metroflow/learning/od_ucb.py`
-- [ ] T064 [US3] Implement routing decision mixer between dynamic potential baseline and adaptive plugin scores in `src/metroflow/routing/policy_mixer.py`
-- [ ] T065 [US3] Implement simulator experience extraction for online learning updates in `src/metroflow/learning/experience.py`
-- [ ] T066 [US3] Integrate OD-UCB scoring/updating and fallback telemetry into `src/metroflow/sim/step.py`
-- [ ] T067 [US3] Extend run summary comparison outputs for baseline vs adaptive experiments in `src/metroflow/sim/run_summary.py`
-- [ ] T068 [US3] Implement benchmark scenario runner and metric capture in `src/metroflow/benchmarks/run.py`
-- [ ] T069 [US3] Add demo flags/config plumbing for baseline-only vs adaptive runs in `src/metroflow/demo.py`
+- [X] T061 [P] [US3] Implement adaptive policy plugin interface and registry in `src/metroflow/learning/plugins.py`
+- [X] T062 [P] [US3] Implement OD route candidate set state and refresh policy in `src/metroflow/routing/candidates.py`
+- [X] T063 [US3] Implement OD-UCB bandit policy state and online update logic in `src/metroflow/learning/od_ucb.py`
+- [X] T064 [US3] Implement routing decision mixer between dynamic potential baseline and adaptive plugin scores in `src/metroflow/routing/policy_mixer.py`
+- [X] T065 [US3] Implement simulator experience extraction for online learning updates in `src/metroflow/learning/experience.py`
+- [X] T066 [US3] Integrate OD-UCB scoring/updating and fallback telemetry into `src/metroflow/sim/step.py`
+- [X] T067 [US3] Extend run summary comparison outputs for baseline vs adaptive experiments in `src/metroflow/sim/run_summary.py`
+- [X] T068 [US3] Implement benchmark scenario runner and metric capture in `src/metroflow/benchmarks/run.py`
+- [X] T069 [US3] Add demo flags/config plumbing for baseline-only vs adaptive runs in `src/metroflow/demo.py`
 
 **Checkpoint**: User Story 3 enables gradual simulator-only online route improvement with reproducible, benchmarkable comparisons and safe fallback behavior
 

@@ -194,6 +194,7 @@ def build_greedy_route_candidate(
     potential_state: DynamicPotentialState,
     *,
     origin_node_id: int,
+    incoming_link_id: int | None = None,
     max_hops: int | None = None,
 ) -> tuple[int, ...]:
     """Build a deterministic greedy route candidate from dynamic potential scores."""
@@ -203,7 +204,7 @@ def build_greedy_route_candidate(
         return ()
     hop_limit = max(1, int(max_hops)) if max_hops is not None else max(1, network.link_count + 1)
     cur_node_id = int(origin_node_id)
-    incoming_link_id: int | None = None
+    cur_incoming_link_id = None if incoming_link_id is None else int(incoming_link_id)
     visited_nodes = {cur_node_id}
     path: list[int] = []
 
@@ -212,13 +213,13 @@ def build_greedy_route_candidate(
             network,
             potential_state,
             current_node_id=cur_node_id,
-            incoming_link_id=incoming_link_id,
+            incoming_link_id=cur_incoming_link_id,
         )
         if scores.best_link_id is None:
             break
         next_link = network.links[network.link_id_to_index[scores.best_link_id]]
         path.append(next_link.link_id)
-        incoming_link_id = next_link.link_id
+        cur_incoming_link_id = next_link.link_id
         cur_node_id = next_link.dst_node_id
         if cur_node_id == destination_node_id:
             return tuple(path)

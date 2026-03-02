@@ -16,10 +16,19 @@ from metroflow.flow.events import (
     advance_traffic_event_scheduler,
 )
 from metroflow.flow.engine import update_link_node_flow
-from metroflow.flow.state import LinkState, NodeState, create_link_state, create_node_state
+from metroflow.flow.state import LinkState, NodeState
+from metroflow.learning.experience import build_experience_batch
+from metroflow.learning.od_ucb import (
+    ODBanditState,
+    compute_ucb_scores_core,
+    create_od_ucb_state,
+    update_od_ucb_state,
+)
 from metroflow.learning.policy_blend import PolicyBlendState
 from metroflow.routing.behavior_profiles import generate_route_choice_profiles
+from metroflow.routing.candidates import RouteCandidateSet, refresh_od_route_candidate_set
 from metroflow.routing.dynamic_potential import build_greedy_route_candidate, compute_dynamic_potential_state
+from metroflow.routing.policy_mixer import mix_route_candidate_scores
 from metroflow.routing.reroute_policy import decide_reroute_vs_persist
 from metroflow.sim.active_agents import (
     ActiveAgentSlot,
@@ -33,15 +42,9 @@ from metroflow.sim.control import SimulationControl, SimulationTelemetry
 from metroflow.sim.init import build_initial_simulation_state
 from metroflow.sim.invariants import InvariantReport
 from metroflow.sim.invariants import validate_invariants as _validate_invariants_core
-from metroflow.sim.rng import PRNGKeyArray, key_from_seed, next_key
-from metroflow.sim.state import (
-    SimulationClockState,
-    SimulationDynamicRefs,
-    SimulationStaticRefs,
-    SimulationState,
-)
+from metroflow.sim.rng import PRNGKeyArray, next_key
+from metroflow.sim.state import SimulationState
 from metroflow.ui.snapshots import build_ui_snapshot_source
-from metroflow.ui.stream_buffer import UISnapshotStreamBuffer
 
 __all__ = [
     "UISnapshotSource",
@@ -53,6 +56,7 @@ __all__ = [
 
 UISnapshotSource = dict[str, Any]
 _US2_EVENTS_REROUTE_INTEGRATED = True
+_US3_POLICY_BLEND_FALLBACK_INTEGRATED = True
 _LINK_ID_LOOKUP_CACHE: dict[tuple[int, int], jnp.ndarray] = {}
 
 
@@ -414,6 +418,17 @@ def _run_baseline_tick_orchestration(
     dynamic_metadata = _copy_dynamic_metadata_for_step(state.dynamic.metadata)
     host_cache = _routing_host_cache_from_metadata(dynamic_metadata)
     _prepare_dynamic_potential_cache_for_tick(host_cache, tick_index=state.tick_index)
+    route_candidate_state = _coerce_route_candidate_state(state.dynamic.route_candidate_state)
+    adaptive_learning_state = _coerce_adaptive_learning_state(state.dynamic.adaptive_learning_state)
+    policy_blend_state = _coerce_policy_blend_state(
+        state.dynamic.policy_blend_state,
+        learning_enabled=state.config.learning_enabled,
+    )
+    if state.config.learning_enabled:
+        policy_blend_state = policy_blend_state.with_lambda(
+            state.config.learning_mix_bounds.lambda_max,
+            bounds=state.config.learning_mix_bounds,
+        )
 
     trip_requests = tuple(demand_state.get("trip_requests", ()))
     if not trip_requests:
@@ -426,14 +441,19 @@ def _run_baseline_tick_orchestration(
     activated = activate_trip_requests(trip_requests, current_tick=state.tick_index)
     demand_state["trip_requests"] = activated
 
-    next_pool, demand_state, spawn_failures = _spawn_due_activated_trips(
+    next_pool, demand_state, route_candidate_state, adaptive_learning_state, policy_blend_state, spawn_failures = (
+        _spawn_due_activated_trips(
         state,
         demand_state,
+        route_candidate_state=route_candidate_state,
+        adaptive_learning_state=adaptive_learning_state,
+        policy_blend_state=policy_blend_state,
         host_cache=host_cache,
+    )
     )
     counters["trip_failed_this_tick"] += spawn_failures
 
-    next_pool, completed_count, failed_count = _advance_and_complete_active_agents(
+    next_pool, completed_count, failed_count, outcome_rows = _advance_and_complete_active_agents(
         state,
         next_pool,
         host_cache=host_cache,
@@ -441,6 +461,13 @@ def _run_baseline_tick_orchestration(
     )
     counters["trip_completed_this_tick"] += completed_count
     counters["trip_failed_this_tick"] += failed_count
+    if state.config.learning_enabled:
+        adaptive_learning_state = _apply_online_learning_updates(
+            state=state,
+            adaptive_learning_state=adaptive_learning_state,
+            policy_blend_state=policy_blend_state,
+            outcome_rows=outcome_rows,
+        )
 
     demand_state = _refresh_demand_counters(demand_state)
     next_link_state, next_node_state = _update_flow_states_from_active_pool(state, next_pool)
@@ -450,6 +477,9 @@ def _run_baseline_tick_orchestration(
         active_agent_pool=next_pool,
         flow_link_state=next_link_state,
         flow_node_state=next_node_state,
+        route_candidate_state=route_candidate_state,
+        adaptive_learning_state=adaptive_learning_state,
+        policy_blend_state=policy_blend_state,
         metadata=dynamic_metadata,
     )
     return next_state, counters
@@ -517,26 +547,46 @@ def _spawn_due_activated_trips(
     state: SimulationState,
     demand_state: dict[str, Any],
     *,
+    route_candidate_state: dict[str, Any],
+    adaptive_learning_state: dict[str, Any],
+    policy_blend_state: PolicyBlendState,
     host_cache: dict[str, Any],
-) -> tuple[ActiveAgentPool, dict[str, Any], int]:
+) -> tuple[ActiveAgentPool, dict[str, Any], dict[str, Any], dict[str, Any], PolicyBlendState, int]:
     pool = state.dynamic.active_agent_pool
     if not isinstance(pool, ActiveAgentPool):
-        return create_active_agent_pool(state.config.active_agent_capacity), demand_state, 0
+        return (
+            create_active_agent_pool(state.config.active_agent_capacity),
+            demand_state,
+            route_candidate_state,
+            adaptive_learning_state,
+            policy_blend_state,
+            0,
+        )
     trips = tuple(demand_state.get("trip_requests", ()))
     if not trips:
-        return pool, demand_state, 0
+        return pool, demand_state, route_candidate_state, adaptive_learning_state, policy_blend_state, 0
 
     routing_static = state.static.routing_static if isinstance(state.static.routing_static, Mapping) else {}
     road_csr = routing_static.get("road_csr")
     if road_csr is None:
-        return pool, demand_state, 0
+        return pool, demand_state, route_candidate_state, adaptive_learning_state, policy_blend_state, 0
 
     pois = tuple(state.static.pois or ())
     poi_node_by_id = {int(poi.poi_id): int(poi.node_id) for poi in pois}
+    node_zone_by_id = routing_static.get("node_zone_by_id", {})
     citizens = tuple(state.static.population or ())
     citizen_by_id = {int(c.citizen_id): c for c in citizens}
     active_routes = host_cache.setdefault("active_trip_routes", {})
-    dynamic_potential_cache = host_cache.setdefault("dynamic_potential_cache", {})
+    active_trip_learning_context = host_cache.setdefault("active_trip_learning_context", {})
+    candidate_sets = route_candidate_state.setdefault("candidate_sets", {})
+    bandit_states = adaptive_learning_state.setdefault("od_bandit_states", {})
+    incident_active = bool(_active_event_affected_link_ids_from_metadata(state.dynamic.metadata)) and _has_active_traffic_events(
+        state.dynamic.event_state
+    )
+    tick_fallback_triggered = bool(policy_blend_state.fallback_triggered)
+    tick_fallback_reason = policy_blend_state.fallback_reason
+    tick_adaptive_enabled = bool(policy_blend_state.adaptive_enabled)
+    tick_decision_count = 0
 
     failed = 0
     next_trips: list[TripRequest] = []
@@ -555,14 +605,35 @@ def _spawn_due_activated_trips(
             failed += 1
             continue
 
-        potential = compute_dynamic_potential_state(
-            road_csr,
+        od_key = _od_key_for_trip(
+            origin_node_id=origin_node_id,
             destination_node_id=dest_node_id,
-            link_state=state.dynamic.flow_link_state,
-            cache=dynamic_potential_cache,
-            cache_key=("dest", int(dest_node_id)),
+            node_zone_by_id=node_zone_by_id,
         )
-        path = build_greedy_route_candidate(road_csr, potential, origin_node_id=origin_node_id)
+        selection = _select_route_for_trip_spawn(
+            state=state,
+            road_csr=road_csr,
+            origin_node_id=origin_node_id,
+            dest_node_id=dest_node_id,
+            od_key=od_key,
+            route_candidate_state=route_candidate_state,
+            adaptive_learning_state=adaptive_learning_state,
+            policy_blend_state=policy_blend_state,
+            incident_active=incident_active,
+            host_cache=host_cache,
+        )
+        selection_blend_state = selection["policy_blend_state"]
+        policy_blend_state = selection_blend_state
+        tick_decision_count += 1
+        tick_fallback_triggered = tick_fallback_triggered or bool(selection_blend_state.fallback_triggered)
+        if tick_fallback_reason is None and selection_blend_state.fallback_reason is not None:
+            tick_fallback_reason = selection_blend_state.fallback_reason
+        tick_adaptive_enabled = tick_adaptive_enabled or bool(selection_blend_state.adaptive_enabled)
+        candidate_sets[selection["candidate_state_key"]] = selection["candidate_set"]
+        bandit_state = selection.get("bandit_state")
+        if isinstance(bandit_state, ODBanditState):
+            bandit_states[selection["bandit_state_key"]] = bandit_state
+        path = selection["path"]
         if not path:
             failed += 1
             continue
@@ -584,10 +655,31 @@ def _spawn_due_activated_trips(
             next_trips.append(trip)
             continue
         active_routes[int(trip.trip_request_id)] = tuple(int(x) for x in path)
+        active_trip_learning_context[int(trip.trip_request_id)] = {
+            "trip_id": int(trip.trip_request_id),
+            "tick_index": int(state.tick_index),
+            "od_key": tuple(od_key),
+            "chosen_candidate_id": selection["chosen_candidate_id"],
+            "chosen_arm_index": selection["chosen_arm_index"],
+            "baseline_travel_time": selection["baseline_travel_time"],
+            "policy_mix_lambda": float(policy_blend_state.lambda_mix),
+            "adaptive_fallback_triggered": bool(policy_blend_state.fallback_triggered),
+            "bandit_state_key": selection["bandit_state_key"],
+        }
         demand_state.setdefault("spawned_slot_ids", {})[int(trip.trip_request_id)] = int(slot_id)
         # Spawned trips leave the pending request pool for conservation accounting.
     demand_state["trip_requests"] = tuple(next_trips)
-    return pool, demand_state, failed
+    route_candidate_state["candidate_sets"] = candidate_sets
+    route_candidate_state["last_refresh_tick"] = int(state.tick_index)
+    adaptive_learning_state["od_bandit_states"] = bandit_states
+    if tick_decision_count > 0:
+        policy_blend_state = replace(
+            policy_blend_state,
+            fallback_triggered=tick_fallback_triggered,
+            fallback_reason=tick_fallback_reason,
+            baseline_only_mode=not tick_adaptive_enabled,
+        )
+    return pool, demand_state, route_candidate_state, adaptive_learning_state, policy_blend_state, failed
 
 
 def _advance_and_complete_active_agents(
@@ -596,17 +688,19 @@ def _advance_and_complete_active_agents(
     *,
     host_cache: dict[str, Any],
     tick_counters: dict[str, int] | None = None,
-) -> tuple[ActiveAgentPool, int, int]:
+) -> tuple[ActiveAgentPool, int, int, tuple[dict[str, Any], ...]]:
     if not isinstance(pool, ActiveAgentPool):
-        return pool, 0, 0
+        return pool, 0, 0, ()
     routing_static = state.static.routing_static if isinstance(state.static.routing_static, Mapping) else {}
     road_csr = routing_static.get("road_csr")
     if road_csr is None:
-        return pool, 0, 0
+        return pool, 0, 0, ()
 
     active_routes = host_cache.setdefault("active_trip_routes", {})
+    active_trip_learning_context = host_cache.setdefault("active_trip_learning_context", {})
     completed = 0
     failed = 0
+    outcome_rows: list[dict[str, Any]] = []
     next_pool = pool
     profile_by_id = _behavior_profile_map_for_state(state, host_cache=host_cache)
     affected_link_ids = _active_event_affected_link_ids_from_metadata(state.dynamic.metadata)
@@ -634,12 +728,24 @@ def _advance_and_complete_active_agents(
         route_ptr = int(next_pool.remaining_route_ptr[slot_id])
         link_index = road_csr.link_id_to_index.get(current_link_id)
         if link_index is None:
+            _append_learning_outcome_row(
+                outcome_rows,
+                active_trip_learning_context.pop(trip_id, None),
+                outcome="failed",
+                tick_index=state.tick_index,
+            )
             next_pool = release_active_agent_slot(next_pool, slot_id)
             active_routes.pop(trip_id, None)
             failed += 1
             continue
         current_link = road_csr.links[link_index]
         if int(current_link.dst_node_id) == dest_node_id:
+            _append_learning_outcome_row(
+                outcome_rows,
+                active_trip_learning_context.pop(trip_id, None),
+                outcome="completed",
+                tick_index=state.tick_index,
+            )
             next_pool = release_active_agent_slot(next_pool, slot_id)
             active_routes.pop(trip_id, None)
             completed += 1
@@ -700,11 +806,17 @@ def _advance_and_complete_active_agents(
             )
             continue
 
+        _append_learning_outcome_row(
+            outcome_rows,
+            active_trip_learning_context.pop(trip_id, None),
+            outcome="failed",
+            tick_index=state.tick_index,
+        )
         next_pool = release_active_agent_slot(next_pool, slot_id)
         active_routes.pop(trip_id, None)
         failed += 1
 
-    return next_pool, completed, failed
+    return next_pool, completed, failed, tuple(outcome_rows)
 
 
 def _refresh_demand_counters(demand_state: dict[str, Any]) -> dict[str, Any]:
@@ -778,11 +890,292 @@ def _copy_dynamic_metadata_for_step(metadata: Any) -> dict[str, Any]:
     host_cache = copied.get("routing_host_cache")
     if isinstance(host_cache, Mapping):
         host_copy = dict(host_cache)
-        for key in ("active_trip_routes", "dynamic_potential_cache", "trip_generation_context"):
+        for key in ("active_trip_routes", "active_trip_learning_context", "dynamic_potential_cache", "trip_generation_context"):
             if isinstance(host_copy.get(key), Mapping):
                 host_copy[key] = dict(host_copy[key])
         copied["routing_host_cache"] = host_copy
     return copied
+
+
+def _coerce_route_candidate_state(value: Any) -> dict[str, Any]:
+    out = dict(value) if isinstance(value, Mapping) else {}
+    candidate_sets = out.get("candidate_sets")
+    out["candidate_sets"] = dict(candidate_sets) if isinstance(candidate_sets, Mapping) else {}
+    out["last_refresh_tick"] = int(out.get("last_refresh_tick", -1))
+    return out
+
+
+def _coerce_adaptive_learning_state(value: Any) -> dict[str, Any]:
+    out = dict(value) if isinstance(value, Mapping) else {}
+    bandit_states = out.get("od_bandit_states")
+    out["od_bandit_states"] = dict(bandit_states) if isinstance(bandit_states, Mapping) else {}
+    out["last_experience_batch_size"] = int(out.get("last_experience_batch_size", 0))
+    out["last_online_update_count_delta"] = int(out.get("last_online_update_count_delta", 0))
+    out["last_mean_reward_estimate"] = float(out.get("last_mean_reward_estimate", 0.0))
+    return out
+
+
+def _coerce_policy_blend_state(value: Any, *, learning_enabled: bool) -> PolicyBlendState:
+    if isinstance(value, PolicyBlendState):
+        return value
+    if isinstance(value, Mapping):
+        return PolicyBlendState(**dict(value))
+    return PolicyBlendState(
+        lambda_mix=0.0,
+        baseline_only_mode=not learning_enabled,
+    )
+
+
+def _od_key_for_trip(
+    *,
+    origin_node_id: int,
+    destination_node_id: int,
+    node_zone_by_id: Any,
+) -> tuple[int, int]:
+    if isinstance(node_zone_by_id, Mapping):
+        origin_zone = int(node_zone_by_id.get(int(origin_node_id), origin_node_id))
+        dest_zone = int(node_zone_by_id.get(int(destination_node_id), destination_node_id))
+        return origin_zone, dest_zone
+    return int(origin_node_id), int(destination_node_id)
+
+
+def _select_route_for_trip_spawn(
+    *,
+    state: SimulationState,
+    road_csr: Any,
+    origin_node_id: int,
+    dest_node_id: int,
+    od_key: tuple[int, int],
+    route_candidate_state: dict[str, Any],
+    adaptive_learning_state: dict[str, Any],
+    policy_blend_state: PolicyBlendState,
+    incident_active: bool,
+    host_cache: dict[str, Any],
+) -> dict[str, Any]:
+    candidate_sets = route_candidate_state.setdefault("candidate_sets", {})
+    dynamic_potential_cache = host_cache.setdefault("dynamic_potential_cache", {})
+    candidate_state_key = _route_candidate_state_key(
+        od_key=od_key,
+        origin_node_id=origin_node_id,
+        destination_node_id=dest_node_id,
+    )
+    existing_candidate_set = candidate_sets.get(candidate_state_key)
+    candidate_set = refresh_od_route_candidate_set(
+        existing_candidate_set if isinstance(existing_candidate_set, RouteCandidateSet) else None,
+        road_csr=road_csr,
+        link_state=state.dynamic.flow_link_state,
+        od_key=tuple(od_key),
+        origin_node_id=int(origin_node_id),
+        destination_node_id=int(dest_node_id),
+        current_tick=state.tick_index,
+        incident_active=incident_active,
+        potential_cache=dynamic_potential_cache,
+    )
+    baseline_scores = tuple(
+        _sum_route_link_costs(path, road_csr=road_csr, flow_link_state=state.dynamic.flow_link_state)
+        for path in candidate_set.candidate_paths
+    )
+    chosen_arm_index = 0 if baseline_scores else None
+    chosen_candidate_id = None if not candidate_set.candidate_ids else int(candidate_set.candidate_ids[0])
+    selected_path = candidate_set.candidate_paths[0] if candidate_set.candidate_paths else ()
+    bandit_state_key = _bandit_state_key_for_candidate_set(
+        od_key=od_key,
+        origin_node_id=origin_node_id,
+        destination_node_id=dest_node_id,
+        candidate_set=candidate_set,
+    )
+    bandit_state = _sync_od_bandit_state_for_candidate_set(
+        adaptive_learning_state.get("od_bandit_states", {}).get(bandit_state_key),
+        od_key=tuple(od_key),
+        candidate_set=candidate_set,
+        current_tick=state.tick_index,
+    )
+
+    if not state.config.learning_enabled:
+        return {
+            "candidate_set": candidate_set,
+            "bandit_state": bandit_state,
+            "path": tuple(selected_path),
+            "chosen_arm_index": chosen_arm_index,
+            "chosen_candidate_id": chosen_candidate_id,
+            "baseline_travel_time": None if chosen_arm_index is None else float(baseline_scores[chosen_arm_index]),
+            "policy_blend_state": policy_blend_state,
+            "candidate_state_key": candidate_state_key,
+            "bandit_state_key": bandit_state_key,
+        }
+
+    adaptive_scores = (
+        None
+        if bandit_state.arm_count <= 0
+        else compute_ucb_scores_core(
+            bandit_state.estimated_reward,
+            bandit_state.pull_count,
+        )
+    )
+    mix_result = mix_route_candidate_scores(
+        baseline_scores=baseline_scores,
+        adaptive_scores=adaptive_scores,
+        blend_state=policy_blend_state,
+        target_lambda=state.config.learning_mix_bounds.lambda_max,
+        bounds=state.config.learning_mix_bounds,
+        learning_enabled=True,
+        incident_mode=False,
+    )
+    chosen_arm_index = mix_result.selected_index
+    if chosen_arm_index is None:
+        chosen_candidate_id = None
+        selected_path = ()
+    else:
+        chosen_candidate_id = int(candidate_set.candidate_ids[chosen_arm_index])
+        selected_path = tuple(candidate_set.candidate_paths[chosen_arm_index])
+    return {
+        "candidate_set": candidate_set,
+        "bandit_state": bandit_state,
+        "path": tuple(selected_path),
+        "chosen_arm_index": chosen_arm_index,
+        "chosen_candidate_id": chosen_candidate_id,
+        "baseline_travel_time": None if chosen_arm_index is None else float(baseline_scores[chosen_arm_index]),
+        "policy_blend_state": mix_result.blend_state,
+        "candidate_state_key": candidate_state_key,
+        "bandit_state_key": bandit_state_key,
+    }
+
+
+def _route_candidate_state_key(
+    *,
+    od_key: tuple[int, int],
+    origin_node_id: int,
+    destination_node_id: int,
+) -> tuple[Any, ...]:
+    return (
+        "route_candidate_set",
+        tuple(int(x) for x in od_key),
+        int(origin_node_id),
+        int(destination_node_id),
+    )
+
+
+def _bandit_state_key_for_candidate_set(
+    *,
+    od_key: tuple[int, int],
+    origin_node_id: int,
+    destination_node_id: int,
+    candidate_set: RouteCandidateSet,
+) -> tuple[Any, ...]:
+    return (
+        "od_ucb_bandit",
+        tuple(int(x) for x in od_key),
+        int(origin_node_id),
+        int(destination_node_id),
+        tuple(candidate_set.candidate_paths),
+    )
+
+
+def _sync_od_bandit_state_for_candidate_set(
+    existing_state: Any,
+    *,
+    od_key: tuple[int, int],
+    candidate_set: RouteCandidateSet,
+    current_tick: int,
+) -> ODBanditState:
+    candidate_ids = tuple(int(x) for x in candidate_set.candidate_ids)
+    if isinstance(existing_state, ODBanditState) and not candidate_ids:
+        return existing_state
+    if (
+        isinstance(existing_state, ODBanditState)
+        and existing_state.candidate_ids is not None
+        and tuple(int(x) for x in existing_state.candidate_ids.tolist()) == candidate_ids
+        and int(existing_state.arm_count) == len(candidate_ids)
+    ):
+        return existing_state
+    return create_od_ucb_state(
+        od_key=tuple(od_key),
+        candidate_count=len(candidate_ids),
+        candidate_ids=candidate_ids,
+        last_update_tick=current_tick,
+    )
+
+
+def _apply_online_learning_updates(
+    *,
+    state: SimulationState,
+    adaptive_learning_state: dict[str, Any],
+    policy_blend_state: PolicyBlendState,
+    outcome_rows: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    if not outcome_rows:
+        adaptive_learning_state["last_experience_batch_size"] = 0
+        adaptive_learning_state["last_online_update_count_delta"] = 0
+        adaptive_learning_state["last_mean_reward_estimate"] = 0.0
+        return adaptive_learning_state
+
+    experience_batch = build_experience_batch(
+        state=state,
+        telemetry={
+            "tick_index": int(state.tick_index),
+            "policy_mix_lambda": float(policy_blend_state.lambda_mix),
+            "adaptive_fallback_triggered": bool(policy_blend_state.fallback_triggered),
+        },
+        outcome_rows=outcome_rows,
+    )
+    bandit_states = dict(adaptive_learning_state.get("od_bandit_states", {}))
+    updated_count = 0
+    observed_rewards: list[float] = []
+    for experience in experience_batch:
+        if experience.chosen_arm_index is None:
+            continue
+        bandit_state_key = experience.metadata.get("bandit_state_key")
+        bandit_state = bandit_states.get(bandit_state_key)
+        if not isinstance(bandit_state, ODBanditState):
+            continue
+        if not (0 <= int(experience.chosen_arm_index) < int(bandit_state.arm_count)):
+            continue
+        bandit_states[bandit_state_key] = update_od_ucb_state(
+            state=bandit_state,
+            arm_index=int(experience.chosen_arm_index),
+            reward=float(experience.reward),
+            tick_index=int(experience.tick_index),
+        )
+        updated_count += 1
+        observed_rewards.append(float(experience.reward))
+    adaptive_learning_state["od_bandit_states"] = bandit_states
+    adaptive_learning_state["last_experience_batch_size"] = len(experience_batch)
+    adaptive_learning_state["last_online_update_count_delta"] = updated_count
+    adaptive_learning_state["last_mean_reward_estimate"] = (
+        float(sum(observed_rewards) / len(observed_rewards))
+        if observed_rewards
+        else 0.0
+    )
+    return adaptive_learning_state
+
+
+def _append_learning_outcome_row(
+    out: list[dict[str, Any]],
+    context: Any,
+    *,
+    outcome: str,
+    tick_index: int,
+) -> None:
+    if not isinstance(context, Mapping):
+        return
+    started_tick = int(context.get("tick_index", tick_index))
+    out.append(
+        {
+            "tick_index": int(tick_index),
+            "trip_id": int(context["trip_id"]),
+            "od_key": tuple(context["od_key"]),
+            "outcome": str(outcome),
+            "chosen_candidate_id": context.get("chosen_candidate_id"),
+            "chosen_arm_index": context.get("chosen_arm_index"),
+            "observed_travel_time": max(0.0, float(int(tick_index) - started_tick)),
+            "baseline_travel_time": context.get("baseline_travel_time"),
+            "policy_mix_lambda": float(context.get("policy_mix_lambda", 0.0)),
+            "adaptive_fallback_triggered": bool(context.get("adaptive_fallback_triggered", False)),
+            "metadata": {
+                "bandit_state_key": context.get("bandit_state_key"),
+            },
+        }
+    )
 
 
 def _routing_host_cache_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
