@@ -9,6 +9,8 @@ between the simulation core and a navigator-style map viewer.
 - UI receives structured, versioned data packets
 - Packet emission supports throttling and downsampling
 - Minimal controls (day/time toggles) are supported
+- Transit/metro observability remains phase-gated so road-only mode can omit
+  transit payloads entirely without schema ambiguity
 
 ## Transport Model (Planning)
 
@@ -41,6 +43,12 @@ Common fields:
 - `tick`: simulation tick index for ordering
 - `sim_time`: current day type and time band
 - `payload`: packet-specific body
+
+Extension compatibility notes:
+- Road-only runs MAY omit transit-specific packet types entirely
+- Multimodal runs MUST still preserve the same common envelope shape
+- Phase-gated transit payloads SHOULD prefer empty arrays / omitted optional
+  fields over blocking the base `ui.congestion_frame` path
 
 ## Simulation -> UI Packets
 
@@ -106,6 +114,46 @@ Payload fields:
 Emission rules:
 - Low to medium frequency (e.g., 1-2 Hz) independent of congestion frames
 
+### 4a. `ui.transit_overlay` (optional low-frequency extension packet)
+
+Purpose:
+- Render stations, lines, and access connectors when transit observability is
+  enabled without changing the road-only base map contract
+
+Payload fields:
+- `overlay_version`
+- `phase_gate` (`phase9_static`, `phase10_passenger`, `phase11_multimodal`)
+- `stations`: array of `{station_id, station_name, x, y, station_kind, serving_line_ids}`
+- `lines`: array of `{line_id, line_name, line_mode, station_sequence}`
+- `connectors`: array of `{connector_id, station_id, anchor_node_id, anchor_zone_id, walk_time_ticks}`
+- `highlight_mode` (`network`, `station_focus`, `line_focus`)
+
+Emission rules:
+- Optional packet; SHOULD NOT be emitted in `road_only` mode
+- Emitted on connect, topology reset, or transit overlay toggle changes
+- In Phase 9, this packet may contain static topology only and MUST NOT require
+  passenger-flow metrics to be populated
+
+### 4b. `ui.station_congestion_summary` (optional low/medium-frequency extension packet)
+
+Purpose:
+- Expose station-level boarding/waiting/transfer/crowding summaries in a
+  transport-friendly aggregate form
+
+Payload fields:
+- `summary_window` (`current_tick`, `time_band_rollup`, `recent_n_ticks`)
+- `phase_gate` (`phase9_static`, `phase10_passenger`, `phase11_multimodal`)
+- `stations`: array of
+  `{station_id, time_band, entries, boardings, alightings, transfer_count, avg_wait_ticks, crowding_ratio, served_line_ids}`
+- `dropped_summary_count_since_last` (for observability under throttling)
+
+Emission rules:
+- Optional packet; SHOULD NOT be emitted in `road_only` mode
+- In Phase 9 static-wiring scenarios, stations MAY be emitted with zero-filled
+  counts so the UI can validate schema presence before passenger flow exists
+- In Phase 10+, packet emission SHOULD be decoupled from per-tick congestion
+  frames and may be throttled independently
+
 ## UI -> Simulation Control Packets
 
 ### 5. `ui.control_command`
@@ -144,6 +192,21 @@ Payload fields:
   remain logically consistent with the underlying simulation state
 - Packet consumers MUST treat missing intermediate `ui.congestion_frame` packets
   as normal behavior
+- Extension transit packets MUST follow the same non-blocking rule; dropping a
+  `ui.transit_overlay` refresh or `ui.station_congestion_summary` update is
+  preferable to delaying simulation steps
+
+## Phase-Gating Rules
+
+- `road_only` mode: only baseline road/event/control packets are required;
+  transit packets MAY be absent and UI consumers MUST treat that as normal
+- `phase9_static`: `ui.transit_overlay` MAY be enabled with station/line/
+  connector metadata while station congestion counts remain empty or zero-filled
+- `phase10_passenger`: station summary packets add boarding/alighting/waiting/
+  transfer aggregates without yet requiring road-vs-transit candidate overlays
+- `phase11_multimodal`: transit overlay and station summary packets may be
+  combined with multimodal comparison views, but they still remain optional
+  adjuncts to the baseline congestion frame rather than replacements for it
 
 ## Determinism and Reproducibility Notes
 
@@ -152,3 +215,6 @@ Payload fields:
   same seed and control/event sequence
 - Control commands affecting day/time/event state should be captured in the run
   log with tick application timing for reproducible replay
+- Transit packet cadence and dropped overlay/summary packets MUST NOT change
+  road-only or multimodal run-summary totals under the same seed and control
+  sequence

@@ -12,6 +12,8 @@ simulation, including validation rules and key state transitions.
 - Event/disruption state
 - Routing baseline + adaptive learning state
 - UI snapshot packet source data
+- Road-only realism metric/report outputs for extension validation
+- Transit/metro static network entities and phase-gated station summaries
 
 ## Core Configuration Entities
 
@@ -126,6 +128,74 @@ Validation rules:
 Relationships:
 - `POI` belongs to one `Zone`
 - `POI` is anchored to one access `Node`
+
+## Transit / Metro Static Entities (Extension Phase 9+)
+
+These entities are phase-gated extensions. They MUST remain optional for the
+baseline road-only mode and are expected to be absent or empty when transit is
+disabled.
+
+### `TransitStation`
+
+- `station_id` (int)
+- `station_name` (string)
+- `x`, `y` (float map coordinates)
+- `station_kind` (local_stop, interchange, terminal)
+- `serving_line_ids` (list[int])
+- `nearest_node_id` (int)
+- `zone_ids` (list[int])
+- `platform_capacity_hint` (int >= 0)
+- `amenity_level` (optional enum: basic, standard, hub)
+
+Validation rules:
+- Each station MUST reference at least one serving line
+- `nearest_node_id` MUST resolve to an existing `Node`
+
+### `TransitLine`
+
+- `line_id` (int)
+- `line_name` (string)
+- `line_mode` (metro, suburban_rail, brt)
+- `station_sequence` (ordered list[`station_id`])
+- `headway_seconds_by_time_band` (mapping of time band -> headway seconds)
+- `operating_day_types` (weekday, weekend, both)
+- `is_loop` (bool)
+
+Validation rules:
+- `station_sequence` MUST contain at least two stations
+- All referenced stations MUST exist
+- Headway values MUST be positive for each configured time band
+
+### `TransitTransfer`
+
+- `transfer_id` (int)
+- `from_station_id` (int)
+- `to_station_id` (int)
+- `walk_time_ticks` (int >= 0)
+- `penalty_ticks` (int >= 0)
+- `shared_complex_id` (optional int)
+- `is_cross_platform` (bool)
+
+Validation rules:
+- `from_station_id != to_station_id`
+- Both station ids MUST resolve to existing `TransitStation` entries
+
+### `AccessConnector`
+
+- `connector_id` (int)
+- `station_id` (int)
+- `anchor_node_id` (optional int)
+- `anchor_zone_id` (optional int)
+- `access_mode` (walk_proxy)
+- `distance_m` (float >= 0)
+- `walk_time_ticks` (int >= 0)
+- `directionality` (entry, exit, bidirectional)
+
+Validation rules:
+- `station_id` MUST resolve to an existing `TransitStation`
+- At least one of `anchor_node_id` or `anchor_zone_id` MUST be present
+- `anchor_node_id`/`anchor_zone_id` MUST resolve when present
+- `access_mode` remains `walk_proxy` for the MVP extension scope
 
 ## Demand / Schedule Entities
 
@@ -292,6 +362,58 @@ Validation rules:
 
 ## Simulation Run / Metrics Entities
 
+### `CityRealismMetrics`
+
+- `node_count`
+- `road_link_count`
+- `bridge_crossing_count`
+- `zone_type_counts`
+- `poi_count`
+- `population_capacity_total`
+- `job_capacity_total`
+- `morphology_irregularity_score`
+- `bridge_closure_delay_ratio`
+- `bridge_closure_component_delta`
+- `zoning_diversity_score`
+
+Validation rules:
+- Count fields MUST be non-negative
+- Score/ratio fields MUST be finite and machine-readable for benchmark export
+
+### `RealismReport`
+
+- `scenario_id`
+- `seed`
+- `scenario_mode` (road_only, multimodal)
+- `population_target`
+- `metrics` (`CityRealismMetrics`)
+- `threshold_results` (mapping metric key -> pass/fail/status)
+- `notes` (optional list[string])
+
+Validation rules:
+- Fixed seed + same scenario config MUST reproduce the same metric keys and
+  threshold result structure
+- `scenario_mode` MUST be reported explicitly so road-only and multimodal
+  benchmarks are not conflated
+
+### `StationSummary`
+
+- `station_id`
+- `time_band`
+- `entries`
+- `boardings`
+- `alightings`
+- `transfer_count`
+- `avg_wait_ticks`
+- `crowding_ratio`
+- `served_line_ids`
+
+Validation rules:
+- All count fields MUST be non-negative
+- `crowding_ratio` MUST be finite and >= 0
+- In Phase 9 static-wiring scenarios, station summaries MAY remain zero-filled
+  placeholders until passenger-flow updates are introduced
+
 ### `RunMetrics`
 
 - `tick_index`
@@ -308,12 +430,15 @@ Validation rules:
 
 - `scenario_id`
 - `seed`
+- `scenario_mode` (road_only, multimodal)
 - `day_type/time schedule config`
 - `trip_generation_total`
 - `trip_completion_rate`
 - `median_trip_time`
 - `p95_trip_time`
 - `bridge_corridor_hotspot_frequency`
+- `realism_report` (optional `RealismReport`)
+- `station_summaries` (optional list[`StationSummary`])
 - `tick_rate_median`
 - `tick_rate_p10`
 - `invariant_violation_counts`
@@ -321,6 +446,7 @@ Validation rules:
 Validation rules:
 - Fixed seed + same scenario config MUST reproduce identical totals for trip
   generation and completion, and matching invariant counts
+- `station_summaries` MUST be empty or omitted in road-only mode
 
 ## UI Source Data Entities (Pre-Packet)
 
@@ -331,6 +457,8 @@ Validation rules:
 - `active_events`
 - `clock_state` (day type, time band, sim tick)
 - `summary_metrics`
+- `station_summaries` (optional, phase-gated transit aggregate view)
+- `transit_static_overlay` (optional stations/lines/connectors snapshot)
 
 Purpose:
 - Intermediate representation used by the UI packet contract to keep simulation

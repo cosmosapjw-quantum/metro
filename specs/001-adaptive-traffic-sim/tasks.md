@@ -178,13 +178,13 @@ description: "Task list for Adaptive Traffic Simulation for Virtual City"
 
 **⚠️ CRITICAL**: Extension implementation phases (Phase 8+) SHOULD NOT begin until extension docs/contracts in this phase are updated
 
-- [ ] T076 Update extension phase sequencing and separate road-only vs multimodal benchmark plan notes in `specs/001-adaptive-traffic-sim/plan.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py` (baseline no-regression smoke)
-- [ ] T077 [P] Update transit/metro realism entities (station, line, transfer, access connector, station summary) and realism metric/report entities in `specs/001-adaptive-traffic-sim/data-model.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py`
-- [ ] T078 [P] Update transit UI overlay / station congestion / phase-gated packet schemas in `specs/001-adaptive-traffic-sim/contracts/ui-data-packets.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/contract/test_ui_packet_contract.py`
-- [ ] T079 [P] Add transit network generation contract (stations/lines/headway/transfer metadata) in `specs/001-adaptive-traffic-sim/contracts/transit-network.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/contract/test_transit_network_contract.py`
-- [ ] T080 [P] Add multimodal routing candidate comparison contract (road vs transit alternatives, walk proxy fields) in `specs/001-adaptive-traffic-sim/contracts/multimodal-routing.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/contract/test_multimodal_routing_contract.py`
-- [ ] T081 [P] Record realism/transit validation and benchmark commands (road-only vs multimodal separated) in `specs/001-adaptive-traffic-sim/quickstart.md`; 완료 조건: `bash scripts/in_docker.sh python -m metroflow.demo`
-- [ ] T082 [P] Document extension tradeoffs for topology realism metrics and transit MVP phase-gating in `specs/001-adaptive-traffic-sim/research.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py`
+- [X] T076 Update extension phase sequencing and separate road-only vs multimodal benchmark plan notes in `specs/001-adaptive-traffic-sim/plan.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py` (baseline no-regression smoke)
+- [X] T077 [P] Update transit/metro realism entities (station, line, transfer, access connector, station summary) and realism metric/report entities in `specs/001-adaptive-traffic-sim/data-model.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py`
+- [X] T078 [P] Update transit UI overlay / station congestion / phase-gated packet schemas in `specs/001-adaptive-traffic-sim/contracts/ui-data-packets.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/contract/test_ui_packet_contract.py`
+- [X] T079 [P] Add transit network generation contract (stations/lines/headway/transfer metadata) in `specs/001-adaptive-traffic-sim/contracts/transit-network.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/contract/test_transit_network_contract.py`
+- [X] T080 [P] Add multimodal routing candidate comparison contract (road vs transit alternatives, walk proxy fields) in `specs/001-adaptive-traffic-sim/contracts/multimodal-routing.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/contract/test_multimodal_routing_contract.py`
+- [X] T081 [P] Record realism/transit validation and benchmark commands (road-only vs multimodal separated) in `specs/001-adaptive-traffic-sim/quickstart.md`; 완료 조건: `bash scripts/in_docker.sh python -m metroflow.demo`
+- [X] T082 [P] Document extension tradeoffs for topology realism metrics and transit MVP phase-gating in `specs/001-adaptive-traffic-sim/research.md`; 완료 조건: `bash scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py`
 
 **Checkpoint**: Extension docs/contracts are explicit enough to drive TDD for realism metrics and transit/multimodal features
 

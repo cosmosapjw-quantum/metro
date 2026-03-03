@@ -121,6 +121,44 @@ resolved here; no `NEEDS CLARIFICATION` items remain.
   - UI-driven simulation loop ownership: risks blocking core loop and mixed
     responsibilities.
 
+## Decision: Topology realism metrics are machine-readable threshold checks, not visual-only judgment
+
+- **Decision**: Evaluate the Phase 8 road-generator realism upgrade with
+  explicit machine-readable metrics and threshold results (`node/link/zone/POI`
+  counts, morphology irregularity, bridge closure sensitivity, zoning
+  diversity), and attach them to a `RealismReport` that names the
+  `scenario_mode`.
+- **Rationale**: The extension needs measurable evidence for realism claims
+  without conflating road-only generator quality with later transit runtime
+  behavior. Machine-readable thresholds make regression tests and benchmark
+  reporting stable across revisions and fixed seeds.
+- **Alternatives considered**:
+  - Screenshot/manual map review only: useful for spotting issues, but too
+    subjective to gate regressions or benchmark claims.
+  - One aggregate realism score only: easier to compare, but hides which aspect
+    regressed (resolution, chokepoint criticality, zoning diversity, or
+    morphology).
+
+## Decision: Transit MVP remains phase-gated behind road-only baseline and static-to-dynamic milestones
+
+- **Decision**: Keep the transit/metro extension split across three gates:
+  Phase 9 static network wiring, Phase 10 passenger-flow summaries, and Phase
+  11 multimodal candidate comparison/UI reporting. Road-only mode remains the
+  default fallback and multimodal benchmarks stay separate until both static and
+  passenger-flow contracts exist.
+- **Rationale**: This reduces regression risk against the baseline road-only
+  demo and preserves a narrow debugging surface at each stage. It also matches
+  the data model boundary where `StationSummary` may remain zero-filled during
+  static-wiring scenarios and only becomes behaviorally meaningful after
+  passenger-flow updates.
+- **Alternatives considered**:
+  - Introduce transit network, passenger flow, and multimodal routing in one
+    step: faster on paper, but too hard to isolate failures in contracts,
+    invariants, and benchmark deltas.
+  - Enable multimodal benchmarking as soon as static transit topology exists:
+    misleading, because waiting/transfer behavior and station summaries are not
+    representative until later phases.
+
 ## Deferred (Non-blocking) Choices
 
 - Exact browser rendering stack details beyond Canvas/WebGL (pure Canvas2D vs

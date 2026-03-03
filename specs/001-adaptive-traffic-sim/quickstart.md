@@ -2,7 +2,9 @@
 
 This document is the container-first developer runbook for the implemented
 road-only MetroFlow MVP. It records the supported command shapes used for smoke
-validation, benchmark runs, reproducibility checks, and UI stream checks.
+validation, benchmark runs, reproducibility checks, and UI stream checks, plus
+phase-gated extension command placeholders for separated road-only vs
+multimodal validation/reporting.
 
 ## 1) Runtime Requirements (Mandatory)
 
@@ -36,8 +38,9 @@ Install project in container:
 2. Run invariant-focused tests (conservation, non-negative queues, capacity violations)
 3. Run boundary-condition tests (weekday/weekend, time-band transitions, blocked edges)
 4. Run reproducibility tests (same seed + same controls/events -> same run summary)
-5. Run performance benchmark for ~100k population playable-speed target
-6. Run UI stream smoke test to confirm throttled packet emission and day/time toggles
+5. Run road-only benchmark/realism smoke before any multimodal validation
+6. Run multimodal benchmark/validation only after transit network and passenger-flow phases are implemented
+7. Run UI stream smoke test to confirm throttled packet emission and day/time toggles
 
 ## 4) Command Examples
 
@@ -123,6 +126,43 @@ Adaptive benchmark example:
   --learning-enabled
 ```
 
+Road-only realism validation and benchmark split:
+
+```bash
+./scripts/in_docker.sh pytest -q tests/unit/test_city_generation.py
+
+./scripts/in_docker.sh python -m metroflow.demo \
+  --scenario synthetic_100k \
+  --seed 42 \
+  --ticks 4 \
+  --day-type weekday \
+  --time-band morning
+
+./scripts/in_docker.sh python -m metroflow.benchmarks.run \
+  --scenario synthetic_100k \
+  --seed 42 \
+  --duration-ticks 3600 \
+  --ui off
+```
+
+Multimodal/transit validation and benchmark split:
+
+```bash
+# Planned command shape for Phase 11/12; not supported by the current baseline CLI yet.
+./scripts/in_docker.sh python -m metroflow.demo \
+  --scenario synthetic_100k \
+  --mode multimodal \
+  --seed 42 \
+  --ticks 4
+
+# Planned command shape for Phase 11/12; keep multimodal reports separate from road-only runs.
+./scripts/in_docker.sh python -m metroflow.benchmarks.run \
+  --scenario synthetic_100k \
+  --mode multimodal \
+  --seed 42 \
+  --duration-ticks 3600
+```
+
 End-to-end quickstart smoke wrapper:
 
 ```bash
@@ -170,6 +210,8 @@ Lint:
   - median tick rate (Hz)
   - p10 tick rate (Hz)
   - active agent count median/p95
+- Road-only realism reports additionally record explicit `scenario_mode=road_only`
+- Multimodal extension reports MUST record `scenario_mode=multimodal` separately
 - Target interpretation:
   - minimum acceptable: >= 2 Hz median during active periods
   - desired range: 2-10 Hz depending on scenario/event load
@@ -183,6 +225,7 @@ Lint:
 ## 6) Benchmark Reporting Template (Use in PR/Review Notes)
 
 - Scenario ID:
+- Scenario mode (`road_only` / `multimodal`):
 - Seed:
 - Population target:
 - Active agent median/p95:
@@ -191,6 +234,8 @@ Lint:
 - p10 tick rate (Hz):
 - Invariant violations (counts):
 - Event mix (if any):
+- Realism report attached (yes/no):
+- Station summaries attached (yes/no):
 - UI mode (off / stream):
 - Environment (ROCm container image + GPU/CPU):
 

@@ -125,6 +125,50 @@ through packet contracts instead of direct rendering calls from the core loop.
 - `specs/001-adaptive-traffic-sim/quickstart.md` defines container-first
   validation steps, smoke benchmarks, and invariants/boundary/repro checks.
 
+## Extension Phase Sequencing (Phase 8+)
+
+Extension work remains phase-gated so the baseline road-only runtime stays
+stable while realism upgrades and transit features are introduced in smaller
+validation steps.
+
+1. **Phase 8 - Road-only realism scaling**: improve the synthetic city
+   generator, zoning/POI scaling, and bridge chokepoint realism without adding
+   transit runtime behavior.
+2. **Phase 9 - Transit network static wiring**: add station/line/headway/
+   transfer entities and initialization boundaries while preserving road-only
+   compatibility when transit is disabled.
+3. **Phase 10 - Passenger flow baseline**: add walk access proxies,
+   boarding/alighting/waiting/transfer state transitions after static transit
+   network generation is validated.
+4. **Phase 11 - Multimodal routing and reporting**: compare road and transit
+   alternatives, expose multimodal summaries in UI/reporting paths, and then
+   measure the combined runtime path.
+
+Sequencing rationale:
+- `data-model.md` currently scopes the baseline around synthetic road topology,
+  demand generation, packed active agents, flow state, routing, and UI source
+  data; transit entities are introduced in later extension design tasks rather
+  than being assumed in the current baseline model.
+- Phase 8 therefore protects the original acceptance boundary: the road-only
+  demo, invariants, and benchmark targets remain the no-regression reference
+  until transit contracts/entities are explicitly added.
+
+## Benchmark Planning Notes (Road-only vs Multimodal)
+
+- Keep the baseline road-only benchmark as the primary no-regression metric for
+  the playable-speed target (`~100k` population, measured tick rate, invariant
+  counts, and hotspot summaries).
+- Run road-only realism benchmarks at the end of Phase 8 using the existing
+  active-agent and flow pipeline so topology/zoning realism changes can be
+  evaluated without transit overhead.
+- Start multimodal benchmarks only after Phase 9 and Phase 10 contracts are in
+  place; report them separately from road-only results because station/line
+  generation, access proxies, and passenger flow introduce different runtime
+  costs and acceptance criteria.
+- When both modes are available, benchmark reports should name the scenario
+  mode explicitly (`road_only` vs `multimodal`) instead of combining them into a
+  single headline tick-rate number.
+
 ## Constitution Check (Post-Design Re-Check)
 
 *GATE: Re-check after Phase 1 design artifacts are drafted.*
