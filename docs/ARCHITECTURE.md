@@ -47,3 +47,15 @@
   - 에이전트-링크 매핑: `edge_id`로 gather/scatter
 - 시각화는 별도 스레드/프로세스에서 low-rate로 샘플링
 
+## 6) US3 적응형 라우팅 tradeoff
+- baseline routing은 동적 퍼텐셜을 유지하고, adaptive는 OD별 bandit/plugin 계층으로 분리한다.
+  - 이유: baseline이 항상 fallback 가능해야 하고, 학습 실패가 core flow update를 막으면 안 된다.
+- route candidate / bandit / policy blend는 `routing`/`learning`/`sim.step`로 나눠서 orchestration만 `sim.step`에 둔다.
+  - 이유: candidate legality, reward update, fallback telemetry를 각각 독립 테스트 가능하게 유지한다.
+- JAX 친화적인 core와 host-side wrapper를 분리한다.
+  - 예: UCB update, run-summary delta, benchmark metric 집계는 core 계산 경계를 따로 두고, markdown/report/demo 출력은 host에서 처리한다.
+  - 이유: CLI/demo/reporting은 `jit` 대상이 아니지만, 수치 core는 이후 batched/JAX 경로로 재사용할 수 있어야 한다.
+- benchmark/demo/reporting은 의도적으로 host-orchestrated tail stage로 둔다.
+  - 이유: `time.perf_counter`, markdown formatting, UI packet counting, git/PR용 보고 포맷은 JAX pure step과 관심사가 다르다.
+- adaptive mixing telemetry는 “설정된 λ”와 “실제 adaptive 적용”을 구분해서 본다.
+  - 이유: fallback tick은 λ가 남아 있어도 실제 결정은 baseline-only일 수 있으므로, observability가 실행 의미를 왜곡하면 안 된다.

@@ -1,8 +1,8 @@
-# Quickstart (Plan Validation and Target Smoke Flows)
+# Quickstart (Developer Runbook and Smoke Flows)
 
-This document defines the planned validation flow for the feature after
-implementation tasks are generated. It is written now so the plan includes
-benchmark, invariant, and reproducibility expectations up front.
+This document is the container-first developer runbook for the implemented
+road-only MetroFlow MVP. It records the supported command shapes used for smoke
+validation, benchmark runs, reproducibility checks, and UI stream checks.
 
 ## 1) Runtime Requirements (Mandatory)
 
@@ -21,7 +21,16 @@ Install project in container:
 ./scripts/in_docker.sh pip install --no-deps -e .
 ```
 
-## 2) Planned Validation Sequence (After Implementation)
+## 2) Developer Runbook
+
+1. Build or refresh the ROCm image when `Dockerfile.rocm` changes
+2. Install the package in editable mode inside the container
+3. Run a baseline demo smoke before larger edits
+4. Run focused `pytest` for touched areas, then broader regression as needed
+5. Use the validation script for end-to-end smoke coverage
+6. Record benchmark/report values with explicit scenario, seed, and UI mode
+
+## 3) Validation Sequence
 
 1. Run baseline smoke simulation on a synthetic city with fixed seed
 2. Run invariant-focused tests (conservation, non-negative queues, capacity violations)
@@ -30,32 +39,69 @@ Install project in container:
 5. Run performance benchmark for ~100k population playable-speed target
 6. Run UI stream smoke test to confirm throttled packet emission and day/time toggles
 
-## 3) Target Smoke Commands (Planned Interface)
+## 4) Command Examples
 
-These command shapes are planning targets for implementation tasks. Final command
-names may be refined, but container-first execution is mandatory.
+These are the current supported commands. Python/JAX execution remains
+container-only; the one exception is the T072 validation wrapper, which runs on
+the host because it shells out to `scripts/in_docker.sh`.
 
 Baseline simulation smoke:
 
 ```bash
 ./scripts/in_docker.sh python -m metroflow.demo \
-  --scenario synthetic_100k \
+  --scenario synthetic_smoke \
   --seed 42 \
+  --ticks 4 \
   --day-type weekday \
-  --time-band morning \
-  --ui stream
+  --time-band morning
 ```
 
-Invariant and boundary tests:
+Adaptive demo smoke:
 
 ```bash
-./scripts/in_docker.sh pytest -q tests/unit tests/integration
+./scripts/in_docker.sh python -m metroflow.demo \
+  --scenario synthetic_smoke \
+  --seed 42 \
+  --ticks 4 \
+  --learning-mode adaptive
+```
+
+UI stream smoke:
+
+```bash
+./scripts/in_docker.sh python -m metroflow.demo \
+  --scenario synthetic_smoke \
+  --seed 42 \
+  --ticks 4 \
+  --ui stream \
+  --ui-force-snapshot-every 1
+```
+
+Unit + integration smoke:
+
+```bash
+./scripts/in_docker.sh python -m pytest -q tests/unit tests/integration
 ```
 
 Reproducibility-focused tests:
 
 ```bash
-./scripts/in_docker.sh pytest -q -k "reproducibility or seed"
+./scripts/in_docker.sh python -m pytest -q tests/integration/test_us3_reproducibility.py
+```
+
+Focused UI non-blocking stress test:
+
+```bash
+./scripts/in_docker.sh python -m pytest -q tests/benchmarks/test_ui_stream_non_blocking.py
+```
+
+Benchmark smoke:
+
+```bash
+./scripts/in_docker.sh python -m metroflow.benchmarks.run \
+  --scenario synthetic_100k \
+  --seed 42 \
+  --duration-ticks 4
 ```
 
 Benchmark run (playable-speed target):
@@ -67,13 +113,35 @@ Benchmark run (playable-speed target):
   --duration-ticks 3600
 ```
 
-UI packet stream smoke (separate viewer/client if applicable):
+Adaptive benchmark example:
 
 ```bash
-./scripts/in_docker.sh python -m metroflow.ui.stream_server --scenario synthetic_100k --seed 42
+./scripts/in_docker.sh python -m metroflow.benchmarks.run \
+  --scenario synthetic_100k \
+  --seed 42 \
+  --duration-ticks 3600 \
+  --learning-enabled
 ```
 
-## 4) Minimum Acceptance Checks for This Feature
+End-to-end quickstart smoke wrapper:
+
+```bash
+bash scripts/validate_adaptive_traffic_sim.sh
+```
+
+Full regression:
+
+```bash
+./scripts/in_docker.sh python -m pytest -q
+```
+
+Lint:
+
+```bash
+./scripts/in_docker.sh ruff check .
+```
+
+## 5) Minimum Acceptance Checks for This Feature
 
 ### Invariants
 
@@ -112,7 +180,7 @@ UI packet stream smoke (separate viewer/client if applicable):
 - Simulation tick progression must continue even when UI consumer is slow
 - Day/time toggle commands are acknowledged and applied on step boundaries
 
-## 5) Benchmark Reporting Template (Use in PR/Review Notes)
+## 6) Benchmark Reporting Template (Use in PR/Review Notes)
 
 - Scenario ID:
 - Seed:
@@ -126,14 +194,16 @@ UI packet stream smoke (separate viewer/client if applicable):
 - UI mode (off / stream):
 - Environment (ROCm container image + GPU/CPU):
 
-## 6) Cross-Document References
+## 7) Cross-Document References
 
 - Plan: `specs/001-adaptive-traffic-sim/plan.md`
 - Research decisions: `specs/001-adaptive-traffic-sim/research.md`
 - Data model: `specs/001-adaptive-traffic-sim/data-model.md`
 - Contracts: `specs/001-adaptive-traffic-sim/contracts/`
+- Architecture notes: `docs/ARCHITECTURE.md`
+- Performance/reporting conventions: `docs/PERFORMANCE_TARGETS.md`
 
-## 7) Phase 1 Setup Task Checkpoints (Placeholders)
+## 8) Phase 1 Setup Task Checkpoints (Placeholders)
 
 Use this checklist to record setup-task completion and quick validation notes as
 implementation progresses.
@@ -143,9 +213,9 @@ implementation progresses.
 - [ ] `T003` Shared pytest fixtures skeleton (`tests/conftest.py`)
 - [ ] `T004` Feature test constants/seed registry (`tests/fixtures/simulation_scenarios.py`)
 - [ ] `T005` Benchmark reporting utility skeleton (`src/metroflow/benchmarks/reporting.py`)
-- [ ] `T006` Quickstart checkpoint/validation placeholders (this section + section 8)
+- [ ] `T006` Quickstart checkpoint/validation placeholders (this section + section 9)
 
-## 8) Validation Command Log Placeholders
+## 9) Validation Command Log Placeholders
 
 Record the exact command, environment, and outcome when running setup/foundational
 validation during implementation.
@@ -164,7 +234,7 @@ docker build -f Dockerfile.rocm -t metroflow:rocm .
 
 ```bash
 # [placeholder] Pytest smoke after setup/foundational tasks
-./scripts/in_docker.sh pytest -q
+./scripts/in_docker.sh python -m pytest -q
 
 # [placeholder] Demo smoke after setup/foundational tasks
 ./scripts/in_docker.sh python -m metroflow.demo

@@ -163,12 +163,12 @@ description: "Task list for Adaptive Traffic Simulation for Virtual City"
 
 **Purpose**: Cross-story hardening, documentation sync, and end-to-end validation
 
-- [ ] T070 [P] Document architecture tradeoffs from this feature in `docs/ARCHITECTURE.md`
-- [ ] T071 [P] Document benchmark targets/reporting conventions in `docs/PERFORMANCE_TARGETS.md`
-- [ ] T072 Add end-to-end container smoke validation script for quickstart commands in `scripts/validate_adaptive_traffic_sim.sh`
-- [ ] T073 [P] Add UI non-blocking stress test (slow consumer / frame drops) in `tests/benchmarks/test_ui_stream_non_blocking.py`
-- [ ] T074 [P] Update developer runbook steps and command examples in `specs/001-adaptive-traffic-sim/quickstart.md`
-- [ ] T075 Run and record feature validation results in `specs/001-adaptive-traffic-sim/checklists/requirements.md`
+- [X] T070 [P] Document architecture tradeoffs from this feature in `docs/ARCHITECTURE.md`
+- [X] T071 [P] Document benchmark targets/reporting conventions in `docs/PERFORMANCE_TARGETS.md`
+- [X] T072 Add end-to-end container smoke validation script for quickstart commands in `scripts/validate_adaptive_traffic_sim.sh`
+- [X] T073 [P] Add UI non-blocking stress test (slow consumer / frame drops) in `tests/benchmarks/test_ui_stream_non_blocking.py`
+- [X] T074 [P] Update developer runbook steps and command examples in `specs/001-adaptive-traffic-sim/quickstart.md`
+- [X] T075 Run and record feature validation results in `specs/001-adaptive-traffic-sim/checklists/requirements.md`
 
 ---
 

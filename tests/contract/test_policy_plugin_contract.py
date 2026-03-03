@@ -40,9 +40,10 @@ def test_policy_plugin_interface_method_boundaries_pending_t061():
         "metroflow.learning.plugins",
         reason="T061 pending: learning.plugins not implemented yet",
     )
-    iface = _pick_first_existing(mod, ("AdaptivePolicyPlugin", "PolicyPlugin"))
-    if iface is None:
+    iface_name = _pick_first_existing(mod, ("AdaptivePolicyPlugin", "PolicyPlugin"))
+    if iface_name is None:
         pytest.skip("T061 pending: plugin interface/protocol export not implemented yet")
+    iface = getattr(mod, iface_name)
 
     missing_methods = tuple(
         name for name in ("init", "score_actions", "update_online") if not hasattr(iface, name)
@@ -61,8 +62,9 @@ def test_policy_plugin_interface_method_boundaries_pending_t061():
     assert tuple(update_sig.parameters)[:4] == ("self", "plugin_state", "experience_batch", "rng_key")
 
     # Contract identity flags documented in `contracts/policy-plugin.md`.
+    annotated_attrs = getattr(iface, "__annotations__", {})
     for attr in ("plugin_name", "plugin_version", "supports_online_update", "supports_batch_context"):
-        assert hasattr(iface, attr)
+        assert hasattr(iface, attr) or attr in annotated_attrs
 
 
 def test_policy_plugin_registry_roundtrip_and_duplicate_guard_pending_t061():
