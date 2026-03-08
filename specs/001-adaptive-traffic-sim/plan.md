@@ -1,195 +1,154 @@
-# Implementation Plan: Adaptive Traffic Simulation for Virtual City
+# Implementation Plan: Unified SDD Gate + Map-Realism-First Execution
 
-**Branch**: `001-adaptive-traffic-sim` | **Date**: 2026-02-23 | **Spec**: `specs/001-adaptive-traffic-sim/spec.md`
-**Input**: Feature specification from `/specs/001-adaptive-traffic-sim/spec.md`
-
-**Note**: This plan covers Phase 0 research and Phase 1 design artifacts only
-(no implementation tasks yet).
+**Branch**: `001-transit-realism-upgrade` | **Date**: 2026-03-08 | **Spec**: `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/spec.md`
+**Input**: Consolidated planning baseline from:
+- `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/spec.md`
+- `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/contracts/document-reconciliation-report.md`
+- `/home/cosmosapjw/metro/prototype.md`
 
 ## Summary
 
-Build a playable-speed virtual-city traffic simulation design for ~100k population
-that produces realistic congestion concentration, rerouting, and bottlenecks
-without relying on real-world map data. The planned technical approach uses a
-JAX-first simulation core with active-agent packed arrays, a link-queue + node
-model traffic engine, congestion-aware dynamic-potential baseline routing, and a
-gradually mixed online learning policy starting with OD-level UCB bandits.
-Visualization is planned as a non-blocking WebSocket + Canvas/WebGL stream with
-throttled/downsampled UI packets.
+This unified SDD plan merges two previously separate planning streams into one
+execution model:
+1. Documentation integrity + prototype reconciliation + dependency coherence gate.
+2. Map-realism foundation gate (`city/generator.py`, `city/zones.py`,
+   `tools/render_city_map.py`, realism metrics evidence).
+
+Simulator-construction expansion is blocked until both gates pass.
 
 ## Technical Context
 
 **Language/Version**: Python 3.11+  
-**Primary Dependencies**: JAX (jit/vmap/segment ops), NumPy-compatible array tooling,
-pytest, ruff, WebSocket-based UI stream + browser Canvas/WebGL client (planned),
-optional `pyqtgraph` for local debugging prototype only  
-**Storage**: N/A for persistent DB; file-based configs/scenario specs/benchmark outputs  
-**Testing**: `pytest` (unit/integration/invariant/reproducibility), containerized smoke benchmarks  
-**Target Platform**: Linux ROCm container for simulation runtime; desktop browser for UI viewer
-**Project Type**: Python simulation engine + lightweight visualization client  
-**Performance Goals**: 100k population scenario, 10k-30k active agents, 2-10 Hz tick target;
-benchmark and smoke runs report measured tick rate/conditions  
-**Constraints**: JAX-first pure step functions; update only active agents via packed arrays;
-default traffic engine = link-queue + node model; CTM optional extension; baseline routing
-always available; learning uses simulator-only online experience; visualization cannot block core loop  
-**Scale/Scope**: Synthetic city with hierarchical roads, barrier + 3-5 bridges, IC/ramps,
-zoning, citizen schedule-based trips, disruption events, behavior diversity, adaptive routing,
-minimal map/congestion UI + day/time toggles
+**Primary Dependencies**: `jax`, `jaxlib`, `numpy`, `pytest`, `ruff`, `matplotlib`, stdlib file/parsing utilities  
+**Storage**: File-based configs/specs/contracts/artifacts/reports (no persistent DB)  
+**Testing**: `pytest` (`tests/unit`, `tests/integration`, `tests/contract`, `tests/benchmarks`, `tests/smoke`)  
+**Target Platform**: Linux + AMD ROCm container runtime  
+**Project Type**: Python simulation engine + internal SDD governance/audit tooling  
+**Performance Goals**: documentation audit <= 60 seconds for current repo scale; map/simulator evidence measured via benchmark and smoke runs  
+**Constraints**: map-realism-first sequencing, constitution authority, deterministic output, container-only Python/JAX validation  
+**Scale/Scope**: project-wide SDD/doc corpus plus 100k-scale synthetic city realism evidence gating before simulator expansion
 
-## Constitution Check (Pre-Research)
+## Constitution Check (Pre-Design)
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- [x] SDD order preserved (`spec -> plan -> tasks -> implement`); this output is
-      planning documentation only, before `/speckit.tasks` and implementation
-- [x] Routing/control design keeps a safe baseline (dynamic potential) and
-      documents gradual mixing for learned policy in `research.md`
-- [x] Learning/training changes use simulator-internal experience only; no
-      external data training is included in scope
-- [x] Core loop design is JAX-first and `jit`-compatible with explicit state and
-      `PRNGKey` handling in `contracts/simulation-step.md`
-- [x] Validation plan includes invariants (conservation, non-negative queues,
-      capacity violation detection) in `quickstart.md` and `data-model.md`
-- [x] Validation plan covers boundary conditions (weekday/weekend, time
-      transitions, blocked edges/incidents) in `quickstart.md`
-- [x] Reproducibility plan defines fixed-seed expectations in `quickstart.md`
-- [x] Performance plan defines benchmark method and target impact in
-      `research.md` and `quickstart.md`
-- [x] Visualization design is asynchronous and rate-limited via UI packet
-      throttling/downsampling in `contracts/ui-data-packets.md`
-- [x] Trade-offs are recorded in `specs/001-adaptive-traffic-sim/research.md`
-      and flagged for shared architecture sync in `docs/ARCHITECTURE.md`
+- [x] **SDD order enforced**: spec -> plan -> tasks sequencing is preserved.
+- [x] **Safe baseline + online-only learning**: no external-data training path introduced.
+- [x] **JAX-first + deterministic RNG**: simulator stream remains JAX-first and deterministic; audit stream requires deterministic report ordering.
+- [x] **Invariant and boundary tests planned**: simulation invariants and documentation-readiness edge cases are both covered.
+- [x] **Evidence-based performance plan**: runtime and realism claims are tied to benchmark/smoke evidence.
+- [x] **Container runtime compliance**: Python/JAX validation commands are containerized with `./scripts/in_docker.sh`.
+- [x] **Constitution path obligations mapped**: bridge/mirroring tasks include mandated files (`specs/001-adaptive-traffic-sim/tasks.md`, `specs/001-adaptive-traffic-sim/research.md`, `docs/ARCHITECTURE.md`).
 
 ## Project Structure
 
-### Documentation (this feature)
+### Unified SDD Documentation Scope
 
 ```text
-specs/001-adaptive-traffic-sim/
-├── plan.md
-├── research.md
-├── data-model.md
-├── quickstart.md
-├── contracts/
-│   ├── simulation-step.md
-│   ├── policy-plugin.md
-│   └── ui-data-packets.md
-├── checklists/
-│   └── requirements.md
-└── tasks.md             # Phase 2 output (next command)
+/home/cosmosapjw/metro/specs/
+├── 001-adaptive-traffic-sim/
+│   ├── spec.md
+│   ├── plan.md
+│   ├── research.md
+│   ├── data-model.md
+│   ├── contracts/
+│   ├── tasks.md
+│   └── reconciliation/
+│       └── quickstart.md
 ```
 
 ### Source Code (repository root)
 
 ```text
-src/
-└── metroflow/
-    ├── city/            # synthetic city generation (roads, bridges, zones)
-    ├── demand/          # citizens, schedules, trip generation
-    ├── flow/            # link-queue + node model state updates
-    ├── routing/         # dynamic potential baseline + route candidates
-    ├── learning/        # OD bandit/UCB (phase 1), policy plugin adapters
-    ├── sim/             # simulation loop orchestration, step/state wrappers
-    ├── ui/              # UI packet generation + throttled streaming
-    ├── benchmarks/      # benchmark specs and measurement helpers
-    └── demo.py
-
-tests/
-├── unit/
-├── integration/
-├── contract/
-└── benchmarks/
+/home/cosmosapjw/metro/
+├── src/metroflow/
+│   ├── city/
+│   │   ├── generator.py
+│   │   ├── zones.py
+│   │   ├── graph.py
+│   │   └── realism_metrics.py
+│   ├── sim/
+│   ├── routing/
+│   ├── learning/
+│   ├── transit/
+│   ├── ui/
+│   ├── gui/
+│   ├── benchmarks/
+│   └── tools/
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   ├── contract/
+│   ├── benchmarks/
+│   └── smoke/
+├── docs/
+├── prototype.md
+├── pyproject.toml
+└── Dockerfile.rocm
 ```
 
-**Structure Decision**: Use the existing single-package Python layout
-(`src/metroflow`) and add domain modules aligned to the City/Demand/Flow/Routing/
-Learning/UI separation required by the constitution. UI remains loosely coupled
-through packet contracts instead of direct rendering calls from the core loop.
+**Structure Decision**: Keep the existing single Python project layout and run
+unified planning with two coordinated gates (doc-readiness gate + realism gate)
+before simulator-construction expansion.
 
-## Phase 0 Research Output
+**Canonical Execution Entrypoint**: `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/tasks.md`
+is the primary task stream; reconciliation substream execution is mandatory via
+Phase 8 (`T059`-`T065`) and must be completed before simulator-construction expansion.
 
-- `specs/001-adaptive-traffic-sim/research.md` resolves architecture choices,
-  learning sequence, visualization transport choice, and benchmark strategy.
-- No unresolved `NEEDS CLARIFICATION` items remain after research.
+**Canonical Phase Semantics (Cross-Doc)**:
+- Phase 8: documentation/prototype/dependency reconciliation gate (`T059`-`T065`)
+- Phase 9: transit static wiring semantics (implemented in tasks Phase 5; see
+  contracts/data-model references for Phase 9 transit-static scope)
+- Phase 10: first-release GUI runtime/control baseline
+- Phase 11: evidence-policy reinforcement (screenshot/nightly/full-batch/min-repetition)
 
-## Phase 1 Design Output
+## Phase 0: Outline & Research
 
-- `specs/001-adaptive-traffic-sim/data-model.md` defines entities, validation
-  rules, and state transitions.
-- `specs/001-adaptive-traffic-sim/contracts/simulation-step.md` defines the
-  pure-step function signatures and state/telemetry contracts.
-- `specs/001-adaptive-traffic-sim/contracts/policy-plugin.md` defines baseline +
-  learning plugin boundaries for OD-UCB first and GNN/LSTM extension later.
-- `specs/001-adaptive-traffic-sim/contracts/ui-data-packets.md` defines throttled
-  non-blocking UI packet schemas and control messages.
-- `specs/001-adaptive-traffic-sim/quickstart.md` defines container-first
-  validation steps, smoke benchmarks, and invariants/boundary/repro checks.
+Unified research output resolves:
+1. Authority and conflict disposition for docs/prototype/constitution.
+2. Deterministic findings/report contract.
+3. Dependency source-of-truth and mismatch policy.
+4. Realism evidence gate required before simulator construction.
 
-## Extension Phase Sequencing (Phase 8+)
+Primary artifacts:
+- `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/research.md`
+- `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/contracts/document-reconciliation-report.md`
 
-Extension work remains phase-gated so the baseline road-only runtime stays
-stable while realism upgrades and transit features are introduced in smaller
-validation steps.
+## Phase 1: Design & Contracts
 
-1. **Phase 8 - Road-only realism scaling**: improve the synthetic city
-   generator, zoning/POI scaling, and bridge chokepoint realism without adding
-   transit runtime behavior.
-2. **Phase 9 - Transit network static wiring**: add station/line/headway/
-   transfer entities and initialization boundaries while preserving road-only
-   compatibility when transit is disabled.
-3. **Phase 10 - Passenger flow baseline**: add walk access proxies,
-   boarding/alighting/waiting/transfer state transitions after static transit
-   network generation is validated.
-4. **Phase 11 - Multimodal routing and reporting**: compare road and transit
-   alternatives, expose multimodal summaries in UI/reporting paths, and then
-   measure the combined runtime path.
+Design artifacts for unified execution:
+- Documentation audit/reconciliation command flow in
+  `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/reconciliation-quickstart.md`
+- Documentation conflict disposition contract in
+  `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/contracts/document-reconciliation-report.md`
+- Map/simulation contracts and data model under
+  `/home/cosmosapjw/metro/specs/001-adaptive-traffic-sim/`
 
-Sequencing rationale:
-- `data-model.md` currently scopes the baseline around synthetic road topology,
-  demand generation, packed active agents, flow state, routing, and UI source
-  data; transit entities are introduced in later extension design tasks rather
-  than being assumed in the current baseline model.
-- Phase 8 therefore protects the original acceptance boundary: the road-only
-  demo, invariants, and benchmark targets remain the no-regression reference
-  until transit contracts/entities are explicitly added.
+Agent context update remains required:
+- `.specify/scripts/bash/update-agent-context.sh codex`
 
-## Benchmark Planning Notes (Road-only vs Multimodal)
+## Phase 2: Unified Planning Strategy (Stop Point)
 
-- Keep the baseline road-only benchmark as the primary no-regression metric for
-  the playable-speed target (`~100k` population, measured tick rate, invariant
-  counts, and hotspot summaries).
-- Run road-only realism benchmarks at the end of Phase 8 using the existing
-  active-agent and flow pipeline so topology/zoning realism changes can be
-  evaluated without transit overhead.
-- Start multimodal benchmarks only after Phase 9 and Phase 10 contracts are in
-  place; report them separately from road-only results because station/line
-  generation, access proxies, and passenger flow introduce different runtime
-  costs and acceptance criteria.
-- When both modes are available, benchmark reports should name the scenario
-  mode explicitly (`road_only` vs `multimodal`) instead of combining them into a
-  single headline tick-rate number.
+Execution order for `/speckit.tasks` and implementation staging:
+1. Run constitution bridge/mirroring updates for mandated files.
+2. Complete documentation integrity + prototype reconciliation + dependency
+   coherence readiness gate tasks (main tasks Phase 8, `T059`-`T065`).
+3. Validate map-realism foundation evidence (`synthetic_smoke` compatibility,
+   key visual signal preservation, realism metrics thresholds).
+4. Open simulator-construction expansion only after both gates pass.
 
-## Constitution Check (Post-Design Re-Check)
+This unified plan intentionally stops at planning scope.
 
-*GATE: Re-check after Phase 1 design artifacts are drafted.*
+## Constitution Check (Post-Design Re-check)
 
-- [x] Safe baseline routing and gradual learning mix are explicitly defined in
-      `contracts/policy-plugin.md` and `research.md`
-- [x] Online-only learning source is documented (simulator episodes/rollouts only)
-- [x] JAX-first pure-step contract and RNG flow are documented in
-      `contracts/simulation-step.md`
-- [x] Invariant/boundary/reproducibility validation is specified in
-      `data-model.md` and `quickstart.md`
-- [x] Performance target and benchmark methodology are documented in
-      `research.md` and `quickstart.md`
-- [x] UI non-blocking throttling/downsampling is documented in
-      `contracts/ui-data-packets.md`
-- [x] No constitution violations require complexity exception tracking
+- [x] **SDD order enforced**: maintained with unified cross-spec gating.
+- [x] **Safe baseline + online-only learning**: no violation introduced.
+- [x] **JAX-first + deterministic RNG**: preserved for simulator stream and audit determinism stream.
+- [x] **Invariant and boundary tests planned**: retained for both streams.
+- [x] **Evidence-based performance plan**: retained with explicit benchmark/smoke outputs.
+- [x] **Container runtime compliance**: explicit in validation tasks.
+- [x] **Constitution path obligations mapped**: retained with bridge/mirror tasks.
 
 ## Complexity Tracking
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
-
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| None | N/A | No constitution violations identified in plan/design phase |
+No unresolved constitution violations are accepted in this unified plan.

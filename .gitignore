@@ -16,3 +16,15 @@ __pycache__/
 .codex/models_cache.json
 .codex/.personality_migration
 .codex/version.json
+
+# Local Codex DB state
+.codex/state_*.sqlite
+.codex/state_*.sqlite-shm
+.codex/state_*.sqlite-wal
+
+# Local build/temp artifacts
+src/metroflow.egg-info/
+tmp/
+
+# Generated artifacts
+/artifacts/

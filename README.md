@@ -27,8 +27,16 @@
 주의
 - Python/JAX 기반 실행(데모, 테스트, 포매팅)은 호스트가 아니라 ROCm 컨테이너에서 수행한다.
 
+GUI 확장 1차 범위(요약)
+- 단일 인터랙티브 클라이언트 + 로컬호스트 실행만 지원(원격/LAN 및 인증은 후속 단계)
+- 기본 패널: map(congestion), metrics summary, timeline, command log/ACK
+- 기본 업데이트 모드: `every N ticks` (N 설정 가능)
+- 벤치마크 수용 기준: tick-rate + dropped/coalesced frame 지표 동시 확인
+- GUI 변경 PR: 최소 screenshot 1장 첨부(영상은 선택)
+
 문서
 - `docs/PRD.md` : 제품 요구사항(PRD)
+- `docs/DOCS_MANIFEST.md` : 구현 기준 문서 인덱스(진실 원천)
 - `docs/SDD_WORKFLOW.md` : spec-kit + Codex로 SDD 진행 절차
 - `specs/001-adaptive-traffic-sim/` : spec/plan/tasks + 부속 문서(quickstart, data-model 등)
-- `docs/prompts/` : Codex/Spec-Kit용 프롬프트 세트
+- `docs/prompts/task-runner-prompts.md` : Task 실행 자동화 프롬프트

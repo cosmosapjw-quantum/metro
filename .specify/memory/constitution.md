@@ -1,25 +1,18 @@
 <!--
 Sync Impact Report
-- Version change: template (unratified placeholder) -> 1.0.0
-- Modified principles:
-  - Template Principle 1 -> I. SDD-First, Small-Diff Delivery
-  - Template Principle 2 -> II. Safe Baseline Routing and Online-Only Learning
-  - Template Principle 3 -> III. JAX-First Pure Core and Deterministic Randomness
-  - Template Principle 4 -> IV. Testable Invariants, Boundary Coverage, Reproducibility
-  - Template Principle 5 -> V. Evidence-Based Performance and Non-Blocking Visualization
+- Version change: 1.1.0 -> 1.1.1
+- Modified principles/sections:
+  - Development Workflow and Quality Gates (exception governance fields aligned
+    with spec-level gate requirements)
 - Added sections:
-  - Technical Constraints and Architecture Boundaries
-  - Development Workflow and Quality Gates
+  - None
 - Removed sections:
   - None
 - Templates requiring updates:
-  - ✅ `.specify/templates/plan-template.md`
-  - ✅ `.specify/templates/spec-template.md`
-  - ✅ `.specify/templates/tasks-template.md`
-  - ✅ `.specify/templates/commands/` (directory absent; no command templates to update)
+  - ✅ None (constitution PATCH clarification only)
 - Runtime guidance docs reviewed:
-  - ✅ `README.md` (container execution guidance aligned)
-  - ✅ `AGENTS.md` (already aligned; no content change)
+  - ✅ `README.md` (no change required)
+  - ✅ `AGENTS.md` (no change required)
 - Follow-up TODOs:
   - None
 -->
@@ -29,12 +22,14 @@ Sync Impact Report
 
 ### I. SDD-First, Small-Diff Delivery
 All work MUST follow `spec -> plan -> tasks -> implement`. Implementations MUST be
-delivered as small, reviewable diffs tied to concrete tasks, and each task MUST
-be independently verifiable by tests, smoke runs, or invariant checks. Large
-rewrites that bypass the current task list are prohibited unless an amendment or
-documented exception is approved in advance. Rationale: MetroFlow combines
-simulation, routing, and learning; small validated increments reduce regression
-risk and keep performance/debugging traceable.
+delivered as small, reviewable diffs tied to concrete tasks, and each task MUST be
+independently verifiable by tests, smoke runs, or invariant checks. Clarification
+decisions that affect behavior, validation, or acceptance MUST be integrated into
+the active spec before planning proceeds. Large rewrites that bypass the current
+task list are prohibited unless an amendment or documented exception is approved
+in advance. Rationale: MetroFlow combines simulation, routing, learning, and GUI
+observability; small validated increments reduce regression risk and keep behavior
+traceable.
 
 ### II. Safe Baseline Routing and Online-Only Learning
 The default control policy MUST remain a safe baseline using congestion-aware
@@ -59,9 +54,11 @@ logic MUST include tests for conservation of vehicles/agents, non-negative queue
 lengths, and capacity-violation detection. Boundary-condition tests MUST cover
 weekday/weekend behavior, time-of-day transitions, and blocked edges
 (construction/accident or equivalent closures) where relevant. Fixed-seed
-reproducibility tests MUST be added or updated for nondeterministic paths.
-Rationale: these are the minimum correctness properties for a dynamic traffic
-simulator and prevent silent physics/logic drift.
+reproducibility tests MUST be added or updated for nondeterministic paths. When
+GUI control semantics are in scope, tests MUST explicitly cover pause/resume/
+single-step behavior and paused-state day/time edits with deterministic apply
+timing. Rationale: these are the minimum correctness properties for a dynamic
+traffic simulator and prevent silent physics/logic drift.
 
 ### V. Evidence-Based Performance and Non-Blocking Visualization
 Performance claims MUST be backed by measurements, profiles, or benchmarks with
@@ -80,16 +77,37 @@ and visualization overhead must not distort core simulation behavior.
 - The system MUST preserve separation between City, Demand, and Flow layers, and
   MUST avoid strong coupling between the city generator and traffic engine.
 - Trade-offs and architecture decisions MUST be recorded in
-  `specs/001-metroflow/research.md` and `docs/ARCHITECTURE.md`.
+  `specs/001-adaptive-traffic-sim/research.md` and `docs/ARCHITECTURE.md`.
 - Learning integrations MUST document baseline fallback behavior, mixing schedule,
   and simulator-only experience source before implementation begins.
 - Visualization integrations MUST document buffering/sampling strategy and prove
   they cannot block or stall simulation ticks.
 
+## Phase-Scoped GUI Runtime and UX Governance
+
+- First GUI-enabled release scope MUST remain single interactive browser client;
+  concurrent multi-client control is out of scope for that phase.
+- GUI runtime MUST use a dedicated entrypoint (for example `metroflow.gui.app`);
+  `metroflow.demo` MUST remain a separate non-GUI baseline path.
+- First GUI-enabled release MUST be local-host only; remote LAN exposure and
+  authentication/authorization requirements are deferred to a later phase.
+- Day-one GUI panels MUST include map with congestion, metrics summary, timeline,
+  and command log/ACK; hotspot list MAY remain deferred.
+- Control semantics MUST include `pause`, `resume`, `single-step` (exactly one
+  tick), and day/time controls; paused-state browsing MUST be snapshot-only and
+  paused-state day/time edits MUST apply on first step after resume.
+- Default GUI update cadence MUST be `every N ticks` (configurable `N`).
+- First GUI browser/runtime target MUST be Chromium-class + WebGL-primary;
+  Canvas2D fallback MAY exist, Firefox parity is deferred.
+- GUI benchmarks MUST include tick-rate plus dropped/coalesced frame metrics, and
+  dropped/coalesced counters MUST be visible in GUI runtime output.
+- GUI-impacting PRs MUST include at least one screenshot artifact; video evidence
+  is optional unless tightened by a later amendment.
+
 ## Development Workflow and Quality Gates
 
 - Implementation MUST start from the next actionable item in
-  `specs/001-metroflow/tasks.md`, with references to relevant plan/data-model
+  `specs/001-adaptive-traffic-sim/tasks.md`, with references to relevant plan/data-model
   docs captured in the task or implementation notes.
 - Before Phase 0 research and again before implementation, each plan MUST pass a
   Constitution Check covering all five core principles and any declared
@@ -98,9 +116,12 @@ and visualization overhead must not distort core simulation behavior.
   and a relevant smoke run; simulator-core changes MUST include a performance
   smoke or benchmark that documents tick rate and scenario size.
 - Reviews MUST verify invariant coverage, boundary-condition coverage, seed
-  reproducibility, and evidence for any performance-sensitive claims.
-- Exceptions MAY be granted only when documented with scope, rationale, rollback
-  plan, and follow-up owner in feature docs or architecture notes.
+  reproducibility, and evidence for any performance-sensitive claims. GUI-scope
+  reviews MUST additionally verify frame-quality metrics and required screenshot
+  artifacts.
+- Exceptions MAY be granted only when documented with approver role, scope,
+  rationale, rollback plan, follow-up owner, and expiry/revalidation checkpoint
+  in feature docs or architecture notes.
 
 ## Governance
 
@@ -126,4 +147,4 @@ Compliance review expectations:
 - Performance, correctness, and reproducibility claims MUST cite the test/smoke
   evidence used to support them.
 
-**Version**: 1.0.0 | **Ratified**: 2026-02-23 | **Last Amended**: 2026-02-23
+**Version**: 1.1.1 | **Ratified**: 2026-02-23 | **Last Amended**: 2026-03-09
