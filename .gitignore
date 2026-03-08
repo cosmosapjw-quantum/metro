@@ -3,6 +3,15 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.hypothesis/
+.pyre/
+.tox/
+.nox/
 
 # Local tool/runtime state (scoped rules live in .codex/.gitignore)
 .codex/log/
@@ -25,6 +34,11 @@ __pycache__/
 # Local build/temp artifacts
 src/metroflow.egg-info/
 tmp/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
 
 # Generated artifacts
 /artifacts/
